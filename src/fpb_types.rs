@@ -90,13 +90,15 @@ mod test {
     use super::NodeState;
     use super::MessageType;
 
+    #[test]
     fn type_test() {
-        let msg = IIDMessage::new( MessageType::Data, None);
+        let msg: IIDMessage<Option<String>> = IIDMessage::new( MessageType::Data, None);
         assert_eq!(msg.msg_type(), MessageType::Data);
-        assert_eq!(msg.payload(), None);
+        assert_eq!(msg.payload.is_none(), true);
 
-        let node = FPBNode::new();
-        assert_eq!(node.node_thread, None);
+        let node: FPBNode<Option<String>> = FPBNode::new();
+        
+        assert_eq!(node.node_thread.is_none(), true);
         assert_eq!(node.state, NodeState::Quiescent);
     }
 }
