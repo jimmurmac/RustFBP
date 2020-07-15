@@ -56,6 +56,12 @@ impl<T> IIDMessage<T> {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct AppendPayload {
+    front: String,
+    end: String
+}
+
 // ----------------------------------------------------------------------------
 // struct FPBNode
 // 
@@ -89,6 +95,7 @@ mod test {
     use super::FPBNode;
     use super::NodeState;
     use super::MessageType;
+    use super::AppendPayload;
 
     #[test]
     fn type_test() {
@@ -97,10 +104,26 @@ mod test {
         assert_eq!(msg.payload.is_none(), true);
 
         let node: FPBNode<Option<String>> = FPBNode::new();
-        
         assert_eq!(node.node_thread.is_none(), true);
-        assert_eq!(node.state, NodeState::Quiescent);
     }
+
+    // #[test]
+    // fn type_test() {
+    // 
+    //     let payload = AppendPayload { front: "Front".to_string(), end: "End".to_string()};
+    //     let serialized = serde_json::to_string(&payload).unwrap();
+    //     let copy_ser = serialized.clone();
+    // 
+    //     let msg = IIDMessage::<String>::new(MessageType::Data, Some(serialized));
+    //     assert_eq!(msg.msg_type(), MessageType::Data);
+    //     assert_eq!(msg.payload().is_some(), true);
+    //     assert_eq!((Some(msg.payload()).unwrap().clone()).unwrap().as_str(), copy_ser.as_str());
+    // 
+    //     let node = FPBNode::<String>::new();
+    //     assert_eq!(!node.node_thread.is_some(), true);
+ 
+    //     assert_eq!(node.state, NodeState::Quiescent);
+    // }
 }
 
 
