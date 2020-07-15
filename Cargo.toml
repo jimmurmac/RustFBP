@@ -10,4 +10,5 @@ edition = "2018"
 serde = "*"
 serde_json = "*"
 serde_derive = "*"
+uuid = { version = "0.8.1", features = ["serde", "v4"] }
 
