@@ -65,30 +65,32 @@ impl IIDMessage {
 }
 
 // ----------------------------------------------------------------------------
-// struct FPBNode_struct
+// struct FPBNodeStruct
 // 
 // Define the basic structure of a FPBNode. Every Node should have one of 
 // these as it's data members
 // ----------------------------------------------------------------------------
 
-struct FPBNode_struct {
-    name: Option<&' static str>,
+struct FPBNodeStruct {
+    name: Option<&'static str>,
     uuid: Uuid,
     sender: std::sync::mpsc::Sender<IIDMessage>,
     receiver: std::sync::mpsc::Receiver<IIDMessage>,
     state: NodeState,
-    node_thread: Option<std::thread::Thread>,
+    node_thread: Option<std::thread::Thread>
 }
 
- impl FPBNode_struct {
+ impl FPBNodeStruct {
      //Constructor
-     pub fn new() -> Self {
+     pub fn new(name: Option<&'static str>) -> Self {
          let (s, r) = channel::<IIDMessage>();
-         FPBNode {
+         FPBNodeStruct {
+             name: name,
+             uuid: Uuid::new_v4(),
              sender: s,
              receiver: r,
              state: NodeState::Quiescent,
-             node_thread: None,
+             node_thread: None
          }
      }
  }
@@ -133,88 +135,64 @@ struct FPBNode_struct {
 //          as needed to fullfil the role of this node.
 //          
 // ----------------------------------------------------------------------------
-trait FPBNodeTrait {
+trait FPBNodeTrait<'a> {
+
+
     // Constructor
     fn new(name: Option<&'static str>) -> Self;
-    fn members(&self) -> &mut FPBNode_struct;
 
-    fn name(&self) -> Option<&' static str>; {
-        self.members().unwrap().name
+
+    fn members(&mut self) -> Box<FPBNodeStruct>;
+
+    fn name(&mut self) -> Option<&'static str> {
+      self.members().name
     }
 
-    fn uuid(&self) -> &Uuid {
-        self.members().unwrap().uuid
+    fn uuid(&mut self) -> Uuid {
+        self.members().uuid
     }
 
-    fn node_state(&self) -> NodeState {
-        self.members().unwrap().state
+    fn node_state(&mut self) -> NodeState {
+        self.members().state
     }
 
-    fn input_port(&self) -> &std::sync::mpsc::Receiver<IIDMessage> {
-        self.members().unwrap().sender
+    fn post_message(&mut self, msg: IIDMessage) {
+        let _ = self.members().sender.send(msg);
+        return
     }
 
-    fn post_message(&self, msg: IIDMessage) {
-        self.input_port().send(msg)
-    }
-
-    fn add_receiver(&self, receiver: mpsc::Receiver<IIDMessage>);
-    fn start(&self);
-    fn stop(&stop);
+    fn add_receiver(&mut self, receiver: std::sync::mpsc::Receiver<IIDMessage>);
+    fn start(&mut self);
+    fn stop(&mut self);
     
-    fn process_data(&self);
+    fn process_data(&mut self);
 }
-
- 
-// ----------------------------------------------------------------------------
-// struct FPBNode_Echo
-// 
-// Define a FPBNode that will echo it input to the console
-// ----------------------------------------------------------------------------
-
-struct FPB_Echo {
-    members: FPBNode_struct;
-}
-
-impl FPBNodeTrait for FPB_Echo
-
-
-
-
-
-
-
 
 #[cfg(test)]
 mod test {
+
     use super::IIDMessage;
-    use super::FPBNode;
-    use super::NodeState;
     use super::MessageType;
-    use super::AppendPayload;
+    use super::FPBNodeStruct;
+    use super::NodeState;
+
+
+    //use super::FPBNodeStruct;
 
     #[test]
     fn type_test() {
-        let msg = IIDMessage::new(MessageType::Data, None);
-        assert_eq!(msg.msg_type(), MessageType::Data);
-        assert_eq!(msg.payload.is_none(), true);
+        let msg = IIDMessage::new(MessageType::Data, Some("foo".to_string()));
 
-        let node = FPBNode::new();
-        assert_eq!(node.node_thread.is_none(), true);
-    }
+        assert_eq!(msg.msg_type, MessageType::Data);
+        assert_eq!(msg.payload.is_none(), false);
 
-    #[test]
-    fn payload_test() {
-        let payload = AppendPayload { front: "Front".to_string(), end: "End".to_string()};
-        let serialized = serde_json::to_string(&payload).unwrap();
-        let msg = IIDMessage::new(MessageType::Data, Some(serialized.clone()));
-        assert_eq!(msg.msg_type(), MessageType::Data);
-        assert_eq!(msg.payload().unwrap().as_str(), serialized.as_str());
+        let node = FPBNodeStruct::new(Some("Bob"));
 
-        let node  = FPBNode::new();
-        assert_eq!(node.node_thread.is_none(), true);
+        assert_eq!(node.name, Some("Bob"));
         assert_eq!(node.state, NodeState::Quiescent);
+        assert_eq!(node.node_thread.is_none(), true);
     }
+
 
 }
 
