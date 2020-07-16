@@ -101,6 +101,14 @@ struct FPBNodeStruct {
 // Define a trait (interface) for a FPBNode.  These methods provide the means
 // for interacting with a node
 //
+//  members:
+//          To facilitate sharing in a composition system like Rust, a specific
+//          implementation of a FPBNode will 'have a' boxed (heap based) 
+//          FPBNodeStruct member.  This allows for sharing the basic member
+//          variable structure that is necessary for every Node.  All of the
+//          other member accessors are based upon getting this FPBNodeStruct
+//          and using that to obtain the specific variable
+//
 //  name:   Each node should have a name.  The field is an Option so that it 
 //          may be None
 //
@@ -109,6 +117,12 @@ struct FPBNodeStruct {
 //
 //  node_state: 
 //          Returns the current state of the node.
+//
+//  input_channel:
+//          Returns the input channel for the node.
+//
+//  output_channel:
+//          Returns the outut channel for the node.
 //
 //  post_message:
 //          A Node acts like an independant processing unit.  It only works on
@@ -135,37 +149,62 @@ struct FPBNodeStruct {
 //          as needed to fullfil the role of this node.
 //          
 // ----------------------------------------------------------------------------
-trait FPBNodeTrait<'a> {
-
+trait FPBNodeTrait {
 
     // Constructor
-    fn new(name: Option<&'static str>) -> Self;
+    //fn new(name: Option<&'static str>) -> Self;
 
-
+    // Accessor for the boxed FPBNodeStruct member variable
     fn members(&mut self) -> Box<FPBNodeStruct>;
 
+    // Accessor to get the name of a Node
     fn name(&mut self) -> Option<&'static str> {
       self.members().name
     }
 
+    // Accessor to get the uuid of a Node
     fn uuid(&mut self) -> Uuid {
         self.members().uuid
     }
 
+    // Accessor to get the current state of the node.
+    // NOTE: This might need to be made atomic
     fn node_state(&mut self) -> NodeState {
         self.members().state
     }
 
+    // Accessor to get the sender channel
+    fn input_channel(&mut self) -> std::sync::mpsc::Sender<IIDMessage> {
+        self.members().sender
+    }
+
+    fn output_channel(&mut self) -> std::sync::mpsc::Receiver<IIDMessage> {
+        self.members().receiver
+    }
+
+    // Post a message to the input queue
     fn post_message(&mut self, msg: IIDMessage) {
         let _ = self.members().sender.send(msg);
         return
     }
 
+    // Add an output node that will receive the output of 
+    // this node.  NOTE: This will need to be implemented as 
+    // a dynamic vector.
     fn add_receiver(&mut self, receiver: std::sync::mpsc::Receiver<IIDMessage>);
+
+    // Start the node to beginning processing.  If the node has already
+    // been started then this method will do nothing.
     fn start(&mut self);
+
+    // Stop all processing for this node.  It remains to be seen 
+    // if this function will block until all currently enqueued message
+    // will be processed, or all unprocessed message will be ignored.
     fn stop(&mut self);
     
+    // This is the processing loop for this Node.
     fn process_data(&mut self);
+   
 }
 
 #[cfg(test)]
@@ -175,9 +214,6 @@ mod test {
     use super::MessageType;
     use super::FPBNodeStruct;
     use super::NodeState;
-
-
-    //use super::FPBNodeStruct;
 
     #[test]
     fn type_test() {
