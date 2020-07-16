@@ -1,5 +1,7 @@
 use std::sync::mpsc::channel;
 use uuid::Uuid;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
 
 // ----------------------------------------------------------------------------
 // enum MessageType
@@ -76,8 +78,9 @@ struct FPBNodeStruct {
     uuid: Uuid,
     sender: std::sync::mpsc::Sender<IIDMessage>,
     receiver: std::sync::mpsc::Receiver<IIDMessage>,
-    state: NodeState,
-    node_thread: Option<std::thread::Thread>
+    state: AtomicBool,
+    node_thread: Option<std::thread::JoinHandle<()>>,
+    output_vec: std::vec::Vec<std::sync::mpsc::Sender<IIDMessage>>
 }
 
  impl FPBNodeStruct {
@@ -89,8 +92,9 @@ struct FPBNodeStruct {
              uuid: Uuid::new_v4(),
              sender: s,
              receiver: r,
-             state: NodeState::Quiescent,
-             node_thread: None
+             state: AtomicBool::new(false),
+             node_thread: None,
+             output_vec: Vec::<std::sync::mpsc::Sender<IIDMessage>>::new()
          }
      }
  }
@@ -149,6 +153,7 @@ struct FPBNodeStruct {
 //          as needed to fullfil the role of this node.
 //          
 // ----------------------------------------------------------------------------
+#[derive(Send)]
 trait FPBNodeTrait {
 
     // Constructor
@@ -167,10 +172,8 @@ trait FPBNodeTrait {
         self.members().uuid
     }
 
-    // Accessor to get the current state of the node.
-    // NOTE: This might need to be made atomic
-    fn node_state(&mut self) -> NodeState {
-        self.members().state
+    fn is_running(&self) -> bool {
+       self.members().state.load(Ordering::Relaxed) == true
     }
 
     // Accessor to get the sender channel
@@ -182,6 +185,10 @@ trait FPBNodeTrait {
         self.members().receiver
     }
 
+    fn output_vetor(&mut self) -> std::vec::Vec<std::sync::mpsc::Sender<IIDMessage>> {
+        self.members().output_vec
+    }
+
     // Post a message to the input queue
     fn post_message(&mut self, msg: IIDMessage) {
         let _ = self.members().sender.send(msg);
@@ -189,21 +196,55 @@ trait FPBNodeTrait {
     }
 
     // Add an output node that will receive the output of 
-    // this node.  NOTE: This will need to be implemented as 
-    // a dynamic vector.
-    fn add_receiver(&mut self, receiver: std::sync::mpsc::Receiver<IIDMessage>);
+    // this node.  
+    fn add_receiver(&mut self, sender: std::sync::mpsc::Sender<IIDMessage>) {
+        self.members().output_vec.push(sender)
+    }
+
+    // This is the processing loop for this Node. It should be re-implemented
+    // for each specific Node. The default processing is to simply write out
+    // the input to the vector of output receivers.
+    fn process_data(&mut self) {
+        // Get the next message to process.  NOTE: This will block if there
+        // are no items to process until a message is added to the input channel
+        let msg = self.output_channel().recv().unwrap();
+        for sender in self.output_vetor() {
+            sender.send(msg);
+        }
+    }
 
     // Start the node to beginning processing.  If the node has already
     // been started then this method will do nothing.
-    fn start(&mut self);
+    fn start(&self) {
+        if !self.is_running() {
+            *self.members().state.get_mut() = true;
+            let loop_condition = self.members().state.load(Ordering::Relaxed);
+            let fpb_trait = FPBNodeTrait;
+            let process_data_callback = || fpb_trait.process_data();
+            let handler = thread::spawn( move || {
+                while loop_condition {
+                    process_data_callback();
+                    loop_condition = self.members().state.load(Ordering::Relaxed);
+                } 
+            });
+
+            self.members().node_thread = Some(handler);
+
+
+          
+        }
+    }
 
     // Stop all processing for this node.  It remains to be seen 
     // if this function will block until all currently enqueued message
     // will be processed, or all unprocessed message will be ignored.
-    fn stop(&mut self);
-    
-    // This is the processing loop for this Node.
-    fn process_data(&mut self);
+    fn stop(&mut self) {
+        if self.is_running() {
+            *self.members().state.get_mut() = false;
+            self.members().node_thread.unwrap().join();
+            self.members().node_thread = None;
+        }
+    }  
    
 }
 
