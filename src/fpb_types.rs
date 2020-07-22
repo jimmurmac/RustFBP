@@ -1,10 +1,13 @@
+use std::sync::mpsc::{Sender, Receiver};
 use std::sync::mpsc::channel;
-use uuid::Uuid;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
+use std::string::String;
+use uuid::Uuid;
+use std::thread::JoinHandle;
 use std::sync::Arc;
-use std::borrow::Borrow;
 use std::sync::Mutex;
+use std::ops::DerefMut;
+use std::borrow::Borrow;
 
 // ----------------------------------------------------------------------------
 // enum MessageType
@@ -25,10 +28,10 @@ pub enum MessageType {
 // defined as a generic.  This would allow for different payload types.
 // ----------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct IIDMessage {
     msg_type: MessageType,
-    payload: Option<&'static str>,
+    payload: Option<String>,
 }
 
 impl IIDMessage {
@@ -36,7 +39,7 @@ impl IIDMessage {
     pub fn new(msg_type: MessageType, payload: Option<String>) -> Self {
         IIDMessage {
             msg_type: msg_type,
-            payload: Box::new(payload),
+            payload: payload,
         }
     }
 
@@ -47,41 +50,36 @@ impl IIDMessage {
 
     // Return a reference to the payload of a IIDMessage
     pub fn payload(&self) -> &Option<String> {
-        if self.payload.is_none() {
-            return &None;
-        }
-        else
-        {
-            self.payload.as_ref()
-        }
+        &self.payload
     }
 }
 
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-struct FPBNodeStruct<'a, 'b> {
+#[derive(Debug, Clone)]
+pub struct FPBNodeStruct {
     name: Option<&'static str>,
     uuid: Uuid,
-    tx: &Box<std::sync::mpsc::Sender<IIDMessage>>,
-    rx: &Box<std::sync::mpsc::Receiver<IIDMessage>>,
-    state: AtomicBool,
-    node_thread: Option<std::thread::JoinHandle<()>>,
-    output_vec: std::vec::Vec<std::sync::mpsc::Sender<Box<IIDMessage>>>
+    tx: Option<Arc<Mutex<Sender<IIDMessage>>>>,
+    rx: Option<Arc<Mutex<Receiver<IIDMessage>>>>,
+    node_join_handle: Option<Arc<Mutex<JoinHandle<()>>>>,
+    output_vec: Option<Arc<Mutex<Vec<Sender<IIDMessage>>>>>
 }
 
 impl FPBNodeStruct {
     //Constructor
-    pub fn new(name: Option<&'static str>) -> Self {
-        let (tx, rx) = channel::<Box<IIDMessage>>();
+    fn new(name: Option<&'static str>) -> Self {
         FPBNodeStruct {
             name: name,
             uuid: Uuid::new_v4(),
-            tx: Box::new(tx),
-            rx: Box::new(rx),
-            state: AtomicBool::new(false),
-            node_thread: None,
-            output_vec: Vec::<std::sync::mpsc::Sender<Box<IIDMessage>>>::new()
+            tx: None,
+            rx: None,
+            node_join_handle: None,
+            output_vec: None,
         }
+    }
+
+    pub fn node_uuid(&self) -> Uuid {
+        self.uuid.clone()
     }
 }
 
@@ -139,88 +137,108 @@ impl FPBNodeStruct {
 //          as needed to fullfil the role of this node.
 //
 // ----------------------------------------------------------------------------
-trait FPBNodeTrait<'a> {
+trait FPBNodeTrait {
 
-    // Constructor
-    //fn new(name: Option<&'static str>) -> Self;
+    fn node_struct(&self) -> FPBNodeStruct;
 
-    // Accessor for the boxed FPBNodeStruct member variable
-    fn members(&mut self) -> Box<FPBNodeStruct>;
-
-    // Accessor to get the name of a Node
-    fn name(&mut self) -> Option<&'static str> {
-        self.members().name
+    fn have_tx(&self)-> bool  {
+        self.node_struct().tx.is_some()
     }
 
-    // Accessor to get the uuid of a Node
-    fn uuid(&mut self) -> Uuid {
-        self.members().uuid
+    fn sender(&self) -> Option<Arc<Mutex<Sender<IIDMessage>>>> {
+        self.node_struct().tx
     }
 
-    fn is_running(&mut self) -> bool {
-        self.members().state.load(Ordering::Relaxed) == true
+    fn receiver(&self) -> Option<Arc<Mutex<Receiver<IIDMessage>>>> {
+        self.node_struct().rx
     }
 
-    fn output_vector(&mut self) -> std::vec::Vec<std::sync::mpsc::Sender<Box<IIDMessage>>> {
-        self.members().output_vec
+    fn join_handle(&self) -> Option<Arc<Mutex<JoinHandle<()>>>> {
+        self.node_struct().node_join_handle
     }
 
-    // Post a message to the input queue
-    fn post_message(&mut self, msg: Box<IIDMessage>) {
-        let _ = self.members().tx.send(msg);
-        return
+    fn output_vec(&self) -> Option<Arc<Mutex<Vec<Sender<IIDMessage>>>>> {
+        self.node_struct().output_vec
     }
 
-    // Add an output node that will receive the output of
-    // this node.
-    fn add_receiver(&mut self, sender: std::sync::mpsc::Sender<Box<IIDMessage>>) {
-        self.members().output_vec.push(sender)
+    fn process_message(&self, msg: Option<IIDMessage>) -> Option<IIDMessage> {
+        if msg.is_some() {
+            return Some(msg.unwrap().clone());
+        }
+        None
     }
 
-    // This is the processing loop for this Node. It should be re-implemented
-    // for each specific Node. The default processing is to simply write out
-    // the input to the vector of output receivers.
-    fn process_data(&mut self) {
-        let msg_result = self.members().rx.recv();
-        if msg_result.is_err() {
-            return
+    fn do_start(self: &'static Self) -> Result<JoinHandle<()>, &'static str>
+    //fn do_start(self: &'static Self, st: &'static FPBnodeStruct) -> Result<JoinHandle<()>, &'static str>
+        where Self: std::marker::Sized + std::marker::Sync + std::marker::Send {
+
+
+        //fn do_start(&self,//rx: Option<Arc<Mutex<Receiver<IIDMessage>>>>,
+        //ov: Option<Arc<Mutex<Vec<Sender<IIDMessage>>>>>,
+        //this: &'static dyn RFPBNode) -> Result<JoinHandle<()>, &'static str> {
+        // If rx is none, then bail.
+
+        //let local_self = *this;
+        //if self.receiver().is_none()  {
+        if self.node_struct().rx.is_none() {
+            return  Err("rx is None")
         }
 
-        let msg = msg_result.unwrap();
+        // Spawn a thread that will loop until the node is stopped.
+        // Note the call to recv will block this thread if there are
+        // no messages to be processed.
+        let joiner = thread::spawn(move || {
+            // Clone the input each time through the loop.
+            // This is required to keep the ownership happy.
+            //let rxc = self.node_struct().rx.clone();
+            let rxc = self.borrow().node_struct().rx.clone();
 
-        for sender in self.members().output_vec {
-            let msg_to_process = msg.clone();
-            sender.send(msg_to_process);
-        }
-    }
+            // While there is a Receiver, pull messages and dispatch them
 
-    fn start(mut self) where Self: 'static + std::marker::Sized + std::marker::Send {
-        if self.is_running() {
-            return
-        }
-        let handler = thread::spawn(move || {
-            let mut loop_condition = true;
-            while loop_condition {
-                self.process_data();
-                loop_condition = self.is_running();
+            while rxc.is_some() {
+                let rxcc = rxc.clone();
+                let rxccu  = rxcc.unwrap();
+                let rxccul = rxccu.lock();
+                let mut rxcculu = rxccul.unwrap();
+                let rxcculur = rxcculu.deref_mut();
+                let msg = rxcculur.recv().unwrap();
+                //let msg = rxc.clone().unwrap().clone().lock().unwrap().deref_mut().recv().unwrap();
+                //let sc = self.node_struct().output_vec.clone();
+                let sc = self.borrow().node_struct().output_vec.clone();
+                let sca = sc.unwrap().clone();
+                let mut scmg = sca.lock().unwrap();
+                let senders = scmg.deref_mut();
+                for sender in senders {
+                    let rmsg = self.process_message(Some(msg.clone()));
+                    if rmsg.is_some() {
+                        let _ = sender.send(rmsg.unwrap());
+                    }
+                    // Some error message should be sent here.
+                }
             }
         });
 
-        self.members().node_thread = Some(handler);
+        return Ok(joiner);
     }
 
-    // Stop all processing for this node.  It remains to be seen
-    // if this function will block until all currently enqueued message
-    // will be processed, or all unprocessed message will be ignored.
-    fn stop(&mut self) {
-        if self.is_running() {
-            *self.members().state.get_mut() = false;
-            self.members().node_thread.unwrap().join();
-            self.members().node_thread = None;
+    fn start(&'static mut self)  where Self: std::marker::Sized + std::marker::Sync + std::marker::Send {
+
+        if self.have_tx() {
+            return
         }
-    }
 
+        let (tx, rx) = channel::<IIDMessage>();
+        let a_vec: Vec<Sender<IIDMessage>> = Vec::new();
+
+        self.node_struct().tx = Some(Arc::new(Mutex::new(tx)));
+        self.node_struct().rx = Some(Arc::new(Mutex::new(rx)));
+        self.node_struct().output_vec = Some(Arc::new(Mutex::new(a_vec)));
+        let join_result = Self::do_start(self);
+
+        self.node_struct().node_join_handle = Some(Arc::new(Mutex::new(join_result.unwrap())));
+    }
 }
+
 
 #[cfg(test)]
 mod test {
