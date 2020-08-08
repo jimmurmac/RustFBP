@@ -20,9 +20,6 @@ use std::fmt;
 use std::error::Error;
 use std::ops::Deref;
 
-
-
-
 /* --------------------------------------------------------------------------
     enum MessageType
 
@@ -474,7 +471,7 @@ pub trait FPBNode { // :  FPBNodeData   {
             });
 
             child.join().expect("Could not join thread for Node");
-            join_node.clone().set_node_is_joined(true);
+            join_node.set_node_is_joined(true);
         }
     }
 
