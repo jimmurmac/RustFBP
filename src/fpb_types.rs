@@ -12,13 +12,14 @@
 
 // System Libraries (Crates) used by this file
 use std::sync::mpsc::{Sender, Receiver, channel};
-use std::{thread, time};
+use std::thread;
 use uuid::Uuid;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{Ordering, AtomicBool};
 use std::fmt;
 use std::error::Error;
 use std::ops::Deref;
+//use std::thread::JoinHandle;
 
 /* --------------------------------------------------------------------------
     enum MessageType
@@ -78,8 +79,8 @@ impl IIDMessage {
     // Constructor for a IIDMessage
     pub fn new(msg_type: MessageType, payload: Option<String>) -> Self {
         IIDMessage {
-            msg_type: msg_type,
-            payload: payload,
+            msg_type,
+            payload,
         }
     }
 
@@ -187,6 +188,7 @@ pub struct FPBNodeContext {
     rx: Arc<Mutex<Receiver<IIDMessage>>>,
     output_vec: Vec<Arc<Mutex<ReceiverContext>>>,
     is_running: Arc<AtomicBool>,
+    join_handle: Option<Arc<thread::JoinHandle<()>>>,
     is_joined: Arc<AtomicBool>,
 }
 
@@ -266,6 +268,7 @@ impl FPBNodeContext {
             rx: Arc::new(Mutex::new(receiver)),
             output_vec: Vec::new(),
             is_running: Arc::new(AtomicBool::new(false)),
+            join_handle: None,
             is_joined: Arc::new(AtomicBool::new(false)),
 
         }
@@ -303,7 +306,14 @@ impl FPBNodeContext {
             let _ = self.tx.lock().unwrap().deref().send(msg);
         }
     }
+
+    fn set_join_handle(&mut self, jh: Option<Arc<thread::JoinHandle<()>>>) {
+        self.join_handle = jh
+    }
+
 }
+
+
 
 /* --------------------------------------------------------------------------
     struct NodeError
@@ -436,78 +446,226 @@ impl Error for NodeError {
           
    -------------------------------------------------------------------------- */
 
-pub trait FPBNode { // :  FPBNodeData   {
+pub trait FPBNode { //: std::marker::Copy { 
 
-    fn node_data(&self) -> FPBNodeContext;
+    fn node_data(&self) -> &FPBNodeContext;
 
     fn node_data_mut(&mut self) -> &mut FPBNodeContext;
 
-    fn process_message(&self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
+    fn process_message(&mut self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
         Ok(msg.clone())
     }
 
-    fn start(self)  where Self: std::marker::Sized, Self: std::marker::Send, Self: 'static {
 
-        if !self.node_data().node_is_running() {
-            let node = self.node_data();
-            let join_node = node.clone();
+    // fn do_start(self) -> Option<Arc<JoinHandle<()>>>  where Self: std::marker::Sized, Self: std::marker::Send, Self: 'static {
+    //   
+    //     if self.node_data().node_is_running() {
+    //         return  None
+    //     } else {
+    //         self.node_data().set_node_is_running(true);
+    //     }
+// 
+    //     let jh = thread::spawn(move || {
+    //         while self.node_data().node_is_running() {
+    //             let msg_to_process = self.node_data().rx.lock().unwrap().recv();
+    //             if msg_to_process.is_ok() {
+    //                 let msg = msg_to_process.unwrap().clone();
+    //                 let processed_msg = self.process_message(msg);
+    //                 if processed_msg.is_ok() {
+    //                     let msg_to_send = processed_msg.unwrap().clone();
+    //                     for sender in &self.node_data().output_vec {
+    //                         let _ = sender.lock().unwrap().deref().input_queue.lock().unwrap().deref().send(msg_to_send.clone());
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     });
+    // 
+    //     Some(Arc::new(jh))
+    // }
 
-            let child = thread::spawn(move || {
-                node.set_node_is_running(true);
+    // fn update_handle(&mut self, jh: Option<Arc<JoinHandle<()>>>) {
+    //     let ndm = self.node_data_mut();
+    //     ndm.set_join_handle(jh);
+    // }
 
-                while node.node_is_running() {
-                    let msg_to_process = node.rx.lock().unwrap().recv();
-                    if msg_to_process.is_ok() {
-                        let msg = msg_to_process.unwrap().clone();
-                        let processed_msg = self.process_message(msg);
-                        if processed_msg.is_ok() {
-                            let msg_to_send = processed_msg.unwrap().clone();
-                            for sender in node.output_vec.clone() {
-                                let _ = sender.clone().lock().unwrap().deref().input_queue.lock().unwrap().deref().send(msg_to_send.clone());
-                            }
+    //fn start(&mut self) where Self: std::marker::Sized, Self: std::marker::Send, Self: 'static {
+    fn start(mut self) where Self: std::marker::Sized, Self: std::marker::Send, Self: 'static {
+       //let jh = (*self).do_start();
+       // let _ = self.do_start();
+       // self.update_handle(jh);
+
+        if self.node_data().node_is_running() {
+            return  // None
+        } else {
+            self.node_data().set_node_is_running(true);
+        }
+
+        let _ = thread::spawn(move || {
+            while self.node_data().node_is_running() {
+                let msg_to_process = self.node_data().rx.lock().unwrap().recv();
+                if msg_to_process.is_ok() {
+                    let msg = msg_to_process.unwrap().clone();
+                    let processed_msg = self.process_message(msg);
+                    if processed_msg.is_ok() {
+                        let msg_to_send = processed_msg.unwrap().clone();
+                        for sender in &self.node_data().output_vec {
+                            let _ = sender.lock().unwrap().deref().input_queue.lock().unwrap().deref().send(msg_to_send.clone());
                         }
                     }
                 }
-            });
-
-            child.join().expect("Could not join thread for Node");
-            join_node.set_node_is_joined(true);
-        }
+            }
+        });
     }
 
     fn stop(&mut self) {
        self.node_data().set_node_is_running(false);
-       while !self.node_data().node_is_joined() {
-           thread::sleep(time::Duration::new(1,0)) // This waits for 1 second.  TODO: maybe wait for shorter time.
-       }
+
+       // TODO: The Join handle is not working as planned
+       // More work to do here
+
+       // if self.node_data().join_handle.is_some() {
+       //     let mut bs = self.node_data_mut().join_handle.clone();
+       //      bs.borrow().join();
+       //     // jh.join();
+       //     self.node_data_mut().set_join_handle(None);
+       // }
     }
 
 }
-/*
 
+/* --------------------------------------------------------------------------
+    mod test 
+
+    Description:    Provide testing for the fpb_types file.
+
+    Tests:
+        test_iidmessage:
+
+            Description:    Do testing for the struct IIDMessage. Creates a 
+                            IIDMessage and ensures that fields are correct.
+
+        test_fpbnode_context:
+
+            Description:    Do testing for the struct FPBNodeContext. Creates
+                            a FPBNodeContext and ensures that the fields are
+                            correct.  Another FPBNodeContext is then created
+                            and added as a receiver for the first node.  The
+                            number of items in the output_vec are checked to
+                            ensure that the receiver was added.  The receiver
+                            is then removed and the output_vec is checked to
+                            ensure that it is now empty.
+   -------------------------------------------------------------------------- */
+             
 #[cfg(test)]
 mod test {
 
-    use super::IIDMessage;
     use super::MessageType;
-    use super::FPBNodeStruct;
-    use super::NodeState;
+    use super::IIDMessage;
+    use super::FPBNodeContext;
+    use super::NodeError;
+    use super::FPBNode;
+    use std::{thread, time};
+
 
     #[test]
-    fn type_test() {
+    fn test_iidmessage() {
         let msg = IIDMessage::new(MessageType::Data, Some("foo".to_string()));
 
         assert_eq!(msg.msg_type, MessageType::Data);
         assert_eq!(msg.payload.is_none(), false);
-
-        let node = FPBNodeStruct::new(Some("Bob"));
-
-        assert_eq!(node.name, Some("Bob"));
-        assert_eq!(node.state, NodeState::Quiescent);
-        assert_eq!(node.node_thread.is_none(), true);
     }
+
+    #[test]
+    fn test_fpbnode_context() {
+        let mut node = FPBNodeContext::new(&"TestNode");
+
+        assert_eq!(node.name, "TestNode");
+        assert_eq!(node.node_is_running(), false);
+        assert_eq!(node.node_is_joined(), false);
+
+        let mut other_node = FPBNodeContext::new(&"OtherNode");
+
+        node.add_receiver(&mut other_node);
+        assert_eq!(node.output_vec.len(), 1);
+
+        node.remove_receiver(&mut other_node);
+        assert_eq!(node.output_vec.len(), 0)
+    }
+
+    
+    use std::path::Path;
+    use std::fs;
+    use std::fs::File;
+    use std::io::prelude::*;
+
+
+         // Create a new node that will output messages sent to it.
+    #[derive(Debug, Clone)]
+    struct LoggerNode{
+        data: FPBNodeContext,
+        log_file: Box<File>,
+    }
+
+    impl LoggerNode {
+        pub fn new(name: &'static str) -> Self {
+            
+            if Path::new("logfile.txt").exists() {
+                fs::remove_file("logfile.txt");
+            }
+
+            LoggerNode {
+                data: FPBNodeContext::new(name),
+                log_file: Box::new(File::create("logfile.txt").unwrap()),
+            }
+        }
+
+        pub fn log_string(&mut self) -> String {
+            let mut contents = String::new();
+            self.log_file.read_to_string(&mut contents);
+            contents
+        }
+    }
+
+    impl FPBNode for LoggerNode   {
+        fn node_data(&self) -> &FPBNodeContext {&self.data}
+
+        fn node_data_mut(&mut self) -> &mut FPBNodeContext {&mut self.data}
+
+        fn process_message(&mut self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
+
+            if msg.payload.is_some() {
+                let payload = msg.clone().payload.unwrap();
+                self.log_file.write(payload.as_bytes());
+            }
+
+            // Pass on the original message
+            Ok(msg.clone())
+        }
+    }
+    #[test]
+    fn run_node() {
+        let mut a_log_node = LoggerNode::new("Logger");
+        
+        a_log_node.start();
+
+        while !a_log_node.node_data().node_is_running() {
+            thread::sleep(time::Duration::new(1,0)) // This waits for 1 second.  TODO: maybe wait for shorter time.
+        }
+
+        assert_eq!(a_log_node.node_data().node_is_running(), true);
+
+        let my_msg = IIDMessage::new(MessageType::Data, Some("Test".to_string()));
+        a_log_node.node_data().post_msg(my_msg);
+
+        a_log_node.stop();
+
+
+        assert_eq!(a_log_node.log_string(), "Test");
+    }
+
 }
 
-*/
+
 
 
