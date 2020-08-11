@@ -450,73 +450,66 @@ pub trait FPBNode { //: std::marker::Copy {
 
     fn node_data(&self) -> &FPBNodeContext;
 
-    fn node_data_mut(&mut self) -> &mut FPBNodeContext;
+    fn node_data_mut(&mut self) -> &mut FPBNodeContext;  
 
-    fn process_message(&mut self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
+    fn process_message(&self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
         Ok(msg.clone())
     }
+    
+    fn start(&mut self)  { //-> &'static mut FPBNodeContext  where Self: std::marker::Sized, Self: std::marker::Send, Self: 'static {
+       
+        let context = &self.node_data();
+        if self.node_data().node_is_running() { return }
 
-
-    // fn do_start(self) -> Option<Arc<JoinHandle<()>>>  where Self: std::marker::Sized, Self: std::marker::Send, Self: 'static {
-    //   
-    //     if self.node_data().node_is_running() {
-    //         return  None
-    //     } else {
-    //         self.node_data().set_node_is_running(true);
-    //     }
-// 
-    //     let jh = thread::spawn(move || {
-    //         while self.node_data().node_is_running() {
-    //             let msg_to_process = self.node_data().rx.lock().unwrap().recv();
-    //             if msg_to_process.is_ok() {
-    //                 let msg = msg_to_process.unwrap().clone();
-    //                 let processed_msg = self.process_message(msg);
-    //                 if processed_msg.is_ok() {
-    //                     let msg_to_send = processed_msg.unwrap().clone();
-    //                     for sender in &self.node_data().output_vec {
-    //                         let _ = sender.lock().unwrap().deref().input_queue.lock().unwrap().deref().send(msg_to_send.clone());
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //     });
-    // 
-    //     Some(Arc::new(jh))
-    // }
-
-    // fn update_handle(&mut self, jh: Option<Arc<JoinHandle<()>>>) {
-    //     let ndm = self.node_data_mut();
-    //     ndm.set_join_handle(jh);
-    // }
-
-    //fn start(&mut self) where Self: std::marker::Sized, Self: std::marker::Send, Self: 'static {
-    fn start(mut self) where Self: std::marker::Sized, Self: std::marker::Send, Self: 'static {
-       //let jh = (*self).do_start();
-       // let _ = self.do_start();
-       // self.update_handle(jh);
-
-        if self.node_data().node_is_running() {
-            return  // None
-        } else {
-            self.node_data().set_node_is_running(true);
-        }
-
-        let _ = thread::spawn(move || {
-            while self.node_data().node_is_running() {
-                let msg_to_process = self.node_data().rx.lock().unwrap().recv();
+        let thread_closure = || {
+            while context.node_is_running() {
+                let msg_to_process = context.rx.lock().unwrap().recv();
                 if msg_to_process.is_ok() {
                     let msg = msg_to_process.unwrap().clone();
                     let processed_msg = self.process_message(msg);
                     if processed_msg.is_ok() {
                         let msg_to_send = processed_msg.unwrap().clone();
-                        for sender in &self.node_data().output_vec {
+                        for sender in &context.output_vec {
                             let _ = sender.lock().unwrap().deref().input_queue.lock().unwrap().deref().send(msg_to_send.clone());
                         }
                     }
                 }
             }
+        };
+
+        let _ = thread::spawn(|thread_closure| {
+            thread_closure();
         });
     }
+
+
+        // let ret_value =  self.node_data_mut();
+// 
+        // if self.node_data().node_is_running() {
+        //     return ret_value
+        // } else {
+        //     self.node_data().set_node_is_running(true);
+        // }
+        // 
+        // let _ = thread::spawn(move || {
+        //     while self.node_data().node_is_running() {
+        //         let msg_to_process = self.node_data().rx.lock().unwrap().recv();
+        //         if msg_to_process.is_ok() {
+        //             let msg = msg_to_process.unwrap().clone();
+        //             let processed_msg = self.process_message(msg);
+        //             if processed_msg.is_ok() {
+        //                 let msg_to_send = processed_msg.unwrap().clone();
+        //                 for sender in &self.node_data().output_vec {
+        //                     let _ = sender.lock().unwrap().deref().input_queue.lock().unwrap().deref().send(msg_to_send.clone());
+        //                 }
+        //             }
+        //         }
+        //     }
+        // });
+// 
+        // ret_value
+
+    // }
 
     fn stop(&mut self) {
        self.node_data().set_node_is_running(false);
@@ -601,7 +594,7 @@ mod test {
 
 
          // Create a new node that will output messages sent to it.
-    #[derive(Debug, Clone)]
+    #[derive(Debug)]
     struct LoggerNode{
         data: FPBNodeContext,
         log_file: Box<File>,
@@ -625,6 +618,8 @@ mod test {
             self.log_file.read_to_string(&mut contents);
             contents
         }
+
+        
     }
 
     impl FPBNode for LoggerNode   {
@@ -632,7 +627,7 @@ mod test {
 
         fn node_data_mut(&mut self) -> &mut FPBNodeContext {&mut self.data}
 
-        fn process_message(&mut self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
+        fn process_message(&self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
 
             if msg.payload.is_some() {
                 let payload = msg.clone().payload.unwrap();
@@ -645,7 +640,7 @@ mod test {
     }
     #[test]
     fn run_node() {
-        let mut a_log_node = LoggerNode::new("Logger");
+        let &mut a_log_node = &mut LoggerNode::new("Logger");
         
         a_log_node.start();
 
