@@ -19,7 +19,9 @@ use std::sync::atomic::{Ordering, AtomicBool};
 use std::fmt;
 use std::error::Error;
 use std::ops::Deref;
-//use std::thread::JoinHandle;
+use serde::{Serialize, Deserialize};
+use serde_json::{Result, Value};
+
 
 /* --------------------------------------------------------------------------
     enum MessageType
@@ -52,6 +54,12 @@ pub enum MessageType {
 pub struct IIDMessage {
     msg_type: MessageType,
     payload: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct ConfigCmd {
+    name: String,
+    args: Option<Vec<String>>
 }
 
 /* --------------------------------------------------------------------------
@@ -307,13 +315,11 @@ impl FPBNodeContext {
         }
     }
 
-    // pub fn process_message(&self, msg: IIDMessage) -> Result<IIDMessage, NodeError> {
-    //     Ok(msg.clone())
-    // }
+    fn set_join_handle(&mut self, jh: Option<Arc<thread::JoinHandle<()>>>) {
+        self.join_handle = jh
+    }
 
 }
-
-
 
 /* --------------------------------------------------------------------------
     struct NodeError
@@ -325,10 +331,16 @@ impl FPBNodeContext {
         details:    The details field will contain a human readable version 
                     of the error.
    -------------------------------------------------------------------------- */
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NodeErrorType {
+    ProcessMessageFailed(String),   // An error occurred while processing a message.
+    StartFailed(String),            // An error occurred while starting a node.
+    StopFailed(String),             // An Error occurred while stopping a mode.
+}
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Eq)]
 pub struct NodeError {
-    details: String
+    details: NodeErrorType,
 }
 
 /* --------------------------------------------------------------------------
@@ -345,8 +357,10 @@ pub struct NodeError {
 
 #[allow(dead_code)]
 impl NodeError {
-    fn new(msg: &str) -> NodeError {
-        NodeError {details: msg.to_string()}
+    fn new(node_error_type : NodeErrorType) -> NodeError {
+        NodeError {
+            details: node_error_type,
+        }
     }
 }
 
@@ -356,7 +370,7 @@ impl NodeError {
 
 impl fmt::Display for NodeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.details)
+        write!(f, "{}", get_node_error_details(self))
     }
 }
 
@@ -366,19 +380,64 @@ impl fmt::Display for NodeError {
 
 impl Error for NodeError {
     fn description(&self) -> &str {
-        &self.details
+        let msg = get_node_error_details(self);
+        let result = msg.as_str();
+        result
     }
 }
 
-trait Processor {
-    // fn call_function(&self, function: &Fn(IIDMessage) -> Result<IIDMessage, NodeError>) -> Result<IIDMessage, NodeError>;
-    fn process_message(&self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
-        // Pass on the original message
-        Ok(msg.clone())
+impl PartialEq for NodeError {
+    fn eq(&self, other: &Self) -> bool {
+        //self.node_uuid == other.node_uuid
+        let mut result = false;
+        match self.details {
+            NodeErrorType::ProcessMessageFailed(s) => {
+                match other.details {
+                    NodeErrorType::ProcessMessageFailed(s) => {
+                        result = true;
+                    }
+                }
+            },
+            NodeErrorType::StartFailed(s) => {
+                match other.details {
+                    NodeErrorType::StartFailed(s) => {
+                        result = true;
+                    }
+                }
+            },
+            NodeErrorType::StopFailed(s) => {
+                match other.details {
+                    NodeErrorType::StopFailed(s) => {
+                        result = true;
+                    }
+                }
+            },
+        }
+
+        result
     }
 }
 
+pub fn get_node_error_details(ne: &NodeError) -> String {
+    let result = String::from("");
 
+    match ne.details {
+        NodeErrorType::ProcessMessageFailed(s) =>  {
+            result.push_str("ProcessMessaged Failed: ");
+            result.push_str(s.as_str());
+        },
+        NodeErrorType::StartFailed(s) => {
+            result.push_str("Node start Failed: ");
+            result.push_str(s.as_str());
+        },
+        NodeErrorType::StopFailed(s) => {
+            result.push_str("Node stop Failed: ");
+            result.push_str(s.as_str());
+        },
+    }
+
+    result
+}
 
 /* --------------------------------------------------------------------------
     trait FPBNode
@@ -462,25 +521,30 @@ pub trait FPBNode { //: std::marker::Copy {
 
     fn node_data_mut(&mut self) -> &mut FPBNodeContext;  
 
-    fn process_message(msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
-        // Pass on the original message
-        Ok(msg.clone())
-    }
+    fn process_message(&self, msg: IIDMessage) -> std::result::Result<IIDMessage, NodeError>;
 
-    fn start(&'static mut self)   { 
+    fn start(node: Arc<Mutex<&mut dyn FPBNode>> ) ->std::result::Result<(), NodeError>  where Self: Sized {
+        
+        let l_result = node.lock();
+        if  l_result.is_err() {
+            let ne = NodeError::new(NodeErrorType::StartFailed("Failed to acquire Lock on the FPBNode trait".to_owned()));
+            return Err(ne);
+        }
 
-        let context: &'static FPBNodeContext = self.node_data();
+        let mut fpb_node = l_result.unwrap().deref_mut();
 
-        if self.node_data().node_is_running() { return }
+        let context = &fpb_node.node_data();
+        if context.node_is_running() {
+            let ne = NodeError::new(NodeErrorType::StartFailed("Failed to start because the node is already running".to_owned()));
+            return Err(result);
+        }
 
-        type ProcessorFn = fn(IIDMessage) -> Result<IIDMessage, NodeError>;
-        let fn_processor: ProcessorFn = Self::process_message;
-
-        let thread_closure = move || {
+        let _jh = thread::spawn(move || {
             while context.node_is_running() {
                 let msg_to_process = context.rx.lock().unwrap().recv();
                 if msg_to_process.is_ok() {
-                    let processed_msg = fn_processor(msg_to_process.unwrap().clone());
+                    let msg = msg_to_process.unwrap().clone();
+                    let processed_msg = fpb_node.process_message(msg);
                     if processed_msg.is_ok() {
                         let msg_to_send = processed_msg.unwrap().clone();
                         for sender in &context.output_vec {
@@ -489,12 +553,36 @@ pub trait FPBNode { //: std::marker::Copy {
                     }
                 }
             }
-        };
-
-        let _ = thread::spawn( move || {
-            thread_closure();
         });
     }
+    
+    // fn start(&mut self)  { //-> &'static mut FPBNodeContext  where Self: std::marker::Sized, Self: std::marker::Send, Self: 'static {
+    //    
+    //     let context = &self.node_data();
+    //     if self.node_data().node_is_running() { return }
+// 
+    //     let thread_closure = |msg: IIDMessage
+    //     
+    //     | {
+    //         while context.node_is_running() {
+    //             let msg_to_process = context.rx.lock().unwrap().recv();
+    //             if msg_to_process.is_ok() {
+    //                 let msg = msg_to_process.unwrap().clone();
+    //                 let processed_msg = self.process_message(msg);
+    //                 if processed_msg.is_ok() {
+    //                     let msg_to_send = processed_msg.unwrap().clone();
+    //                     for sender in &context.output_vec {
+    //                         let _ = sender.lock().unwrap().deref().input_queue.lock().unwrap().deref().send(msg_to_send.clone());
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     };
+// 
+    //     let _ = thread::spawn(|thread_closure| {
+    //         thread_closure();
+    //     });
+    // }
 
 
         // let ret_value =  self.node_data_mut();
@@ -641,7 +729,7 @@ mod test {
 
         fn node_data_mut(&mut self) -> &mut FPBNodeContext {&mut self.data}
 
-        fn process_message(msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
+        fn process_message(&self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
 
             if msg.payload.is_some() {
                 let payload = msg.clone().payload.unwrap();
