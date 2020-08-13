@@ -21,6 +21,8 @@ use std::error::Error;
 use std::ops::Deref;
 use serde::{Serialize, Deserialize};
 use serde_json::{Result, Value};
+use std::any::Any;
+
 
 
 /* --------------------------------------------------------------------------
@@ -338,7 +340,7 @@ pub enum NodeErrorType {
     StopFailed(String),             // An Error occurred while stopping a mode.
 }
 
-#[derive(Debug, Clone, Eq)]
+#[derive(Debug, Clone)]
 pub struct NodeError {
     details: NodeErrorType,
 }
@@ -370,7 +372,7 @@ impl NodeError {
 
 impl fmt::Display for NodeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", get_node_error_details(self))
+        write!(f, "{}", (self))
     }
 }
 
@@ -379,49 +381,34 @@ impl fmt::Display for NodeError {
    -------------------------------------------------------------------------- */
 
 impl Error for NodeError {
+    /*
     fn description(&self) -> &str {
-        let msg = get_node_error_details(self);
-        let result = msg.as_str();
+        let result = get_node_error_details(self).as_str();
         result
     }
+    */
 }
 
+/*
 impl PartialEq for NodeError {
     fn eq(&self, other: &Self) -> bool {
         //self.node_uuid == other.node_uuid
-        let mut result = false;
-        match self.details {
-            NodeErrorType::ProcessMessageFailed(s) => {
-                match other.details {
-                    NodeErrorType::ProcessMessageFailed(s) => {
-                        result = true;
-                    }
-                }
-            },
-            NodeErrorType::StartFailed(s) => {
-                match other.details {
-                    NodeErrorType::StartFailed(s) => {
-                        result = true;
-                    }
-                }
-            },
-            NodeErrorType::StopFailed(s) => {
-                match other.details {
-                    NodeErrorType::StopFailed(s) => {
-                        result = true;
-                    }
-                }
-            },
-        }
+        //let mut result = false;
+        let result = match &self.details {
+            NodeErrorType::ProcessMessageFailed(_) => other.details == NodeErrorType::ProcessMessageFailed(_),
+            NodeErrorType::StartFailed(_) => other.details  == NodeErrorType::StartFailed(_),
+            NodeErrorType::StopFailed(_) => other.details  == NodeErrorType::StopFailed(_),
+        };
 
         result
     }
 }
+*/
 
 pub fn get_node_error_details(ne: &NodeError) -> String {
-    let result = String::from("");
+    let mut result = String::from("");
 
-    match ne.details {
+    match &ne.details {
         NodeErrorType::ProcessMessageFailed(s) =>  {
             result.push_str("ProcessMessaged Failed: ");
             result.push_str(s.as_str());
@@ -523,109 +510,61 @@ pub trait FPBNode { //: std::marker::Copy {
 
     fn process_message(&self, msg: IIDMessage) -> std::result::Result<IIDMessage, NodeError>;
 
-    fn start(node: Arc<Mutex<&mut dyn FPBNode>> ) ->std::result::Result<(), NodeError>  where Self: Sized {
-        
-        let l_result = node.lock();
-        if  l_result.is_err() {
-            let ne = NodeError::new(NodeErrorType::StartFailed("Failed to acquire Lock on the FPBNode trait".to_owned()));
+    fn process_config(&self, msg: IIDMessage) -> bool {
+        if msg.payload.is_some() {
+            if msg.payload.unwrap().as_str() == "Stop" {
+                return true
+            }
+        }
+
+        false
+    }
+
+    fn start(node: Box<dyn FPBNode + Send>) -> std::result::Result<(), NodeError>  where Self: Sized {
+        let static_node_ref: &'static mut (dyn FPBNode + Send) = Box::leak(node);
+        if static_node_ref.node_data().node_is_running() {
+            let ne = NodeError::new(NodeErrorType::StartFailed("Failed to start because the node is already running".to_owned()));
             return Err(ne);
         }
 
-        let mut fpb_node = l_result.unwrap().deref_mut();
-
-        let context = &fpb_node.node_data();
-        if context.node_is_running() {
-            let ne = NodeError::new(NodeErrorType::StartFailed("Failed to start because the node is already running".to_owned()));
-            return Err(result);
-        }
-
         let _jh = thread::spawn(move || {
-            while context.node_is_running() {
-                let msg_to_process = context.rx.lock().unwrap().recv();
+            while static_node_ref.node_data().node_is_running() {
+                let msg_to_process = static_node_ref.node_data().rx.lock().unwrap().recv();
                 if msg_to_process.is_ok() {
                     let msg = msg_to_process.unwrap().clone();
-                    let processed_msg = fpb_node.process_message(msg);
-                    if processed_msg.is_ok() {
-                        let msg_to_send = processed_msg.unwrap().clone();
-                        for sender in &context.output_vec {
-                            let _ = sender.lock().unwrap().deref().input_queue.lock().unwrap().deref().send(msg_to_send.clone());
+                    
+                    // Check to see if this is a Config message or a 'normal' message
+                    if msg.msg_type == MessageType::Config {
+                        // This is a config message so do the config work.  If 
+                        //  proesss_config returns true, it is time to exit the
+                        // this loop and stop processing.
+                        if static_node_ref.process_config(msg) {
+                            // If this is true time to die.
+                            static_node_ref.stop();
+                        }
+                    } else {
+                        // This is a 'normal' message to the standard processing
+                        let processed_msg = static_node_ref.process_message(msg);
+                        if processed_msg.is_ok() {
+                            let msg_to_send = processed_msg.unwrap().clone();
+                            for sender in &static_node_ref.node_data().output_vec {
+                                let _ = sender.lock().unwrap().deref().input_queue.lock().unwrap().deref().send(msg_to_send.clone());
+                            }
                         }
                     }
                 }
             }
         });
+
+        Ok(())
     }
-    
-    // fn start(&mut self)  { //-> &'static mut FPBNodeContext  where Self: std::marker::Sized, Self: std::marker::Send, Self: 'static {
-    //    
-    //     let context = &self.node_data();
-    //     if self.node_data().node_is_running() { return }
-// 
-    //     let thread_closure = |msg: IIDMessage
-    //     
-    //     | {
-    //         while context.node_is_running() {
-    //             let msg_to_process = context.rx.lock().unwrap().recv();
-    //             if msg_to_process.is_ok() {
-    //                 let msg = msg_to_process.unwrap().clone();
-    //                 let processed_msg = self.process_message(msg);
-    //                 if processed_msg.is_ok() {
-    //                     let msg_to_send = processed_msg.unwrap().clone();
-    //                     for sender in &context.output_vec {
-    //                         let _ = sender.lock().unwrap().deref().input_queue.lock().unwrap().deref().send(msg_to_send.clone());
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //     };
-// 
-    //     let _ = thread::spawn(|thread_closure| {
-    //         thread_closure();
-    //     });
-    // }
 
-
-        // let ret_value =  self.node_data_mut();
-// 
-        // if self.node_data().node_is_running() {
-        //     return ret_value
-        // } else {
-        //     self.node_data().set_node_is_running(true);
-        // }
-        // 
-        // let _ = thread::spawn(move || {
-        //     while self.node_data().node_is_running() {
-        //         let msg_to_process = self.node_data().rx.lock().unwrap().recv();
-        //         if msg_to_process.is_ok() {
-        //             let msg = msg_to_process.unwrap().clone();
-        //             let processed_msg = self.process_message(msg);
-        //             if processed_msg.is_ok() {
-        //                 let msg_to_send = processed_msg.unwrap().clone();
-        //                 for sender in &self.node_data().output_vec {
-        //                     let _ = sender.lock().unwrap().deref().input_queue.lock().unwrap().deref().send(msg_to_send.clone());
-        //                 }
-        //             }
-        //         }
-        //     }
-        // });
-// 
-        // ret_value
-
-    // }
 
     fn stop(&mut self) {
        self.node_data().set_node_is_running(false);
-
-       // TODO: The Join handle is not working as planned
-       // More work to do here
-
-       // if self.node_data().join_handle.is_some() {
-       //     let mut bs = self.node_data_mut().join_handle.clone();
-       //      bs.borrow().join();
-       //     // jh.join();
-       //     self.node_data_mut().set_join_handle(None);
-       // }
     }
+
+    fn as_any (&self) -> &dyn std::any::Any;
 
 }
 
@@ -739,12 +678,17 @@ mod test {
             // Pass on the original message
             Ok(msg.clone())
         }
+
+        fn as_any (&self) -> &dyn std::any::Any {
+            self
+        }
+
     }
     #[test]
     fn run_node() {
-        let &mut a_log_node = &mut LoggerNode::new("Logger");
-        
-        a_log_node.start();
+        let a_log_node = LoggerNode::new("Logger") as Box<dyn FPBNode + Send>;
+
+        FPBNode::start(a_log_node);
 
         while !a_log_node.node_data().node_is_running() {
             thread::sleep(time::Duration::new(1,0)) // This waits for 1 second.  TODO: maybe wait for shorter time.
@@ -757,10 +701,13 @@ mod test {
 
         a_log_node.stop();
 
-
-        assert_eq!(a_log_node.log_string(), "Test");
+        let yatz = y.downcast_ref::<LoggerNode>();
+        if yatz.is_some() {
+            assert_eq!(yatz.unwrap().log_string(), "Test"); 
+        }
+               
+        
     }
-
 }
 
 
