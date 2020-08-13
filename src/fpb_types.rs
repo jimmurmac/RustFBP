@@ -306,11 +306,6 @@ impl FPBNodeContext {
             let _ = self.tx.lock().unwrap().deref().send(msg);
         }
     }
-
-    // pub fn process_message(&self, msg: IIDMessage) -> Result<IIDMessage, NodeError> {
-    //     Ok(msg.clone())
-    // }
-
 }
 
 
@@ -370,6 +365,7 @@ impl Error for NodeError {
     }
 }
 
+/*
 trait Processor {
     // fn call_function(&self, function: &Fn(IIDMessage) -> Result<IIDMessage, NodeError>) -> Result<IIDMessage, NodeError>;
     fn process_message(&self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
@@ -377,7 +373,7 @@ trait Processor {
         Ok(msg.clone())
     }
 }
-
+*/
 
 
 /* --------------------------------------------------------------------------
@@ -462,25 +458,25 @@ pub trait FPBNode { //: std::marker::Copy {
 
     fn node_data_mut(&mut self) -> &mut FPBNodeContext;  
 
-    fn process_message(msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
+    fn process_message(&self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
         // Pass on the original message
         Ok(msg.clone())
     }
 
-    fn start(&'static mut self)   { 
+    fn start(&'static mut self + Send)   { 
 
         let context: &'static FPBNodeContext = self.node_data();
 
         if self.node_data().node_is_running() { return }
 
-        type ProcessorFn = fn(IIDMessage) -> Result<IIDMessage, NodeError>;
-        let fn_processor: ProcessorFn = Self::process_message;
+        // type ProcessorFn = fn(IIDMessage) -> Result<IIDMessage, NodeError>;
+        // let fn_processor: ProcessorFn = Self::process_message;
 
         let thread_closure = move || {
             while context.node_is_running() {
                 let msg_to_process = context.rx.lock().unwrap().recv();
                 if msg_to_process.is_ok() {
-                    let processed_msg = fn_processor(msg_to_process.unwrap().clone());
+                    let processed_msg = self.process_message(msg_to_process.unwrap().clone()); // fn_processor(msg_to_process.unwrap().clone());
                     if processed_msg.is_ok() {
                         let msg_to_send = processed_msg.unwrap().clone();
                         for sender in &context.output_vec {
@@ -641,7 +637,7 @@ mod test {
 
         fn node_data_mut(&mut self) -> &mut FPBNodeContext {&mut self.data}
 
-        fn process_message(msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
+        fn process_message(&self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
 
             if msg.payload.is_some() {
                 let payload = msg.clone().payload.unwrap();
