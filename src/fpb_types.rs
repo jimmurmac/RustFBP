@@ -14,12 +14,12 @@
 use std::sync::mpsc::{Sender, Receiver, channel};
 use std::thread;
 use uuid::Uuid;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::sync::atomic::{Ordering, AtomicBool};
 use std::fmt;
 use std::error::Error;
-use std::ops::Deref;
-//use std::thread::JoinHandle;
+use std::ops::{Deref, DerefMut};
+
 
 /* --------------------------------------------------------------------------
     enum MessageType
@@ -282,14 +282,6 @@ impl FPBNodeContext {
         self.is_running.store(flag, Ordering::Relaxed)
     }
 
-    fn node_is_joined(&self) -> bool {
-        self.is_joined.deref().load(Ordering::Relaxed)
-    }
-
-    fn set_node_is_joined(&self, flag: bool) {
-        self.is_joined.store(flag, Ordering::Relaxed)
-    }
-
     pub fn add_receiver(&mut self, receiver: &mut FPBNodeContext ) {
         let rr = ReceiverContext::new(receiver);
         self.output_vec.push(Arc::new(Mutex::new(rr)));
@@ -301,7 +293,7 @@ impl FPBNodeContext {
         self.output_vec.remove(index);
     }
 
-    pub fn post_msg(&self, msg: IIDMessage) {
+    pub fn post_msg(&mut self, msg: IIDMessage) {
         if self.node_is_running() {
             let _ = self.tx.lock().unwrap().deref().send(msg);
         }
@@ -364,17 +356,6 @@ impl Error for NodeError {
         &self.details
     }
 }
-
-/*
-trait Processor {
-    // fn call_function(&self, function: &Fn(IIDMessage) -> Result<IIDMessage, NodeError>) -> Result<IIDMessage, NodeError>;
-    fn process_message(&self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
-        // Pass on the original message
-        Ok(msg.clone())
-    }
-}
-*/
-
 
 /* --------------------------------------------------------------------------
     trait FPBNode
@@ -452,87 +433,57 @@ trait Processor {
           
    -------------------------------------------------------------------------- */
 
-pub trait FPBNode { //: std::marker::Copy { 
+impl DerefMut for Arc<Box<dyn FPBNode + std::marker::Send + std::marker::Sync>> {
+    fn deref_mut(&mut self) -> mut dyn FPBNode {
+        &mut self.lock()
+    }
+}
+
+pub trait FPBNode { 
 
     fn node_data(&self) -> &FPBNodeContext;
 
     fn node_data_mut(&mut self) -> &mut FPBNodeContext;  
 
-    fn process_message(&self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
-        // Pass on the original message
-        Ok(msg.clone())
-    }
+    fn process_config(&mut self, msg:IIDMessage) -> Result<(), NodeError>;
 
-    fn start(&'static mut self + Send)   { 
+    fn process_message(&self, msg: IIDMessage) ->  Result<IIDMessage, NodeError>;
+//  + std::ops::DerefMut<Target = dyn FPBNode 
 
-        let context: &'static FPBNodeContext = self.node_data();
+    fn start(mut self, a_node: Mutex<Arc<Box<dyn FPBNode + Send + Sync >>>) where Self: std::marker::Sized {
+        thread::spawn( move || {
+            let mut locked_node = a_node.lock().unwrap();
+            if !locked_node.node_data().node_is_running() { 
+                locked_node.node_data().set_node_is_running(true);
+                while locked_node.node_data().node_is_running() { 
+                    let msg_to_process = locked_node.node_data().rx.lock().unwrap().recv();
+                    if msg_to_process.is_ok() {
 
-        if self.node_data().node_is_running() { return }
+                        let unwrapped_msg = msg_to_process.unwrap();
 
-        // type ProcessorFn = fn(IIDMessage) -> Result<IIDMessage, NodeError>;
-        // let fn_processor: ProcessorFn = Self::process_message;
-
-        let thread_closure = move || {
-            while context.node_is_running() {
-                let msg_to_process = context.rx.lock().unwrap().recv();
-                if msg_to_process.is_ok() {
-                    let processed_msg = self.process_message(msg_to_process.unwrap().clone()); // fn_processor(msg_to_process.unwrap().clone());
-                    if processed_msg.is_ok() {
-                        let msg_to_send = processed_msg.unwrap().clone();
-                        for sender in &context.output_vec {
-                            let _ = sender.lock().unwrap().deref().input_queue.lock().unwrap().deref().send(msg_to_send.clone());
-                        }
-                    }
-                }
-            }
-        };
-
-        let _ = thread::spawn( move || {
-            thread_closure();
+                        match unwrapped_msg.msg_type {
+                            MessageType::Config => {
+                                locked_node.process_config(unwrapped_msg.clone());
+                            },
+                            MessageType::Data => {
+                                let processed_msg = locked_node.process_message(unwrapped_msg.clone()); 
+                                if processed_msg.is_ok() {
+                                    let msg_to_send = processed_msg.unwrap().clone();
+                                    for sender in &locked_node.node_data().output_vec {
+                                        let _ = sender.lock().unwrap().deref().input_queue.lock().unwrap().deref().send(msg_to_send.clone());
+                                    }
+                                }
+                            },
+                        } // match unwrapped_msg.msg_type      
+                    } // if msg_to_process.is_ok()
+                } // while locked_node.node_data().node_is_running()
+            } // if !locked_node.node_data().node_is_running()
         });
     }
 
 
-        // let ret_value =  self.node_data_mut();
-// 
-        // if self.node_data().node_is_running() {
-        //     return ret_value
-        // } else {
-        //     self.node_data().set_node_is_running(true);
-        // }
-        // 
-        // let _ = thread::spawn(move || {
-        //     while self.node_data().node_is_running() {
-        //         let msg_to_process = self.node_data().rx.lock().unwrap().recv();
-        //         if msg_to_process.is_ok() {
-        //             let msg = msg_to_process.unwrap().clone();
-        //             let processed_msg = self.process_message(msg);
-        //             if processed_msg.is_ok() {
-        //                 let msg_to_send = processed_msg.unwrap().clone();
-        //                 for sender in &self.node_data().output_vec {
-        //                     let _ = sender.lock().unwrap().deref().input_queue.lock().unwrap().deref().send(msg_to_send.clone());
-        //                 }
-        //             }
-        //         }
-        //     }
-        // });
-// 
-        // ret_value
-
-    // }
-
     fn stop(&mut self) {
        self.node_data().set_node_is_running(false);
-
-       // TODO: The Join handle is not working as planned
-       // More work to do here
-
-       // if self.node_data().join_handle.is_some() {
-       //     let mut bs = self.node_data_mut().join_handle.clone();
-       //      bs.borrow().join();
-       //     // jh.join();
-       //     self.node_data_mut().set_join_handle(None);
-       // }
     }
 
 }
@@ -569,6 +520,158 @@ mod test {
     use super::NodeError;
     use super::FPBNode;
     use std::{thread, time};
+    use std::path::Path;
+    use std::fs;
+    use std::fs::File;
+    use std::io::prelude::*;
+    use std::sync::{Arc, RwLock, Mutex};
+
+
+    #[derive(Debug, Clone)]
+    struct LoggerNode{
+        data: Box<FPBNodeContext>,
+        log_file: Box<Arc<File>>,
+    }
+   
+    impl LoggerNode {
+
+        pub fn new(node_name: &'static str, logfile_name: &'static str) -> Self {
+
+            if Path::new(logfile_name).exists() {
+                fs::remove_file(logfile_name);
+            }
+
+            let f = File::create(logfile_name).unwrap();
+            let ln = FPBNodeContext::new(node_name);
+
+            LoggerNode {
+                data: Box::new(ln),
+                log_file: Box::new(Arc::new(f)),
+            }
+        }
+
+        pub fn wrap_self(mut self) -> Mutex<Arc<LoggerNode>> {
+            Mutex::new(Arc::new(self.clone()))
+        }
+    }
+
+    impl FPBNode for LoggerNode   {
+        fn node_data(&self) -> &FPBNodeContext {&self.data}
+
+        fn node_data_mut(&mut self) -> &mut FPBNodeContext {&mut self.data}
+
+        fn process_message(&mut self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
+
+            if msg.payload.is_some() {
+                let payload = msg.clone().payload.unwrap();
+                self.log_file.write(payload.as_bytes());
+            }
+
+            // Pass on the original message
+            Ok(msg.clone())
+        }
+
+        fn make_thread_closure(&mut self) -> impl Fn() {
+
+        }
+    }
+
+
+    lazy_static! {
+        static ref LOGGERNODE: LoggerNode = {
+            let mut lnode = LoggerNode::new("Logger");
+            lnode
+        };
+    }
+
+        /*
+        pub fn current() -> Arc<LoggerNode> {
+            CURRENT_LOGGERNODE.with(|c| c.read().unwrap().clone())
+        }
+
+        pub fn make_current(self) {
+            CURRENT_LOGGERNODE.with(|c| *c.write().unwrap() = Arc::new(self))
+        }
+        */
+
+/*
+    thread_local! {
+        static CURRENT_LOGGERNODE: RwLock<Arc<LoggerNode>> = RwLock::new(Arc::new(LoggerNode::new("foo", "foo.txt")));
+    }
+*/
+    /*
+
+        pub fn current() -> Arc<LoggerNode> {
+            CURRENT_LOGGERNODE.with(|c| c.read().unwrap().clone())
+        }
+
+
+        pub fn make_current(self, name: &'static str) {
+            
+            
+            CURRENT_LOGGERNODE.with(|c| *c.write().unwrap() = Arc::new())
+        }
+    }
+
+    thread_local! {
+        static CURRENT_LOGGERNODE: RwLock<Arc<LoggerNode>> = RwLock::new(Arc::new(LoggerNode::new("Bob")));
+    }
+
+*/
+    /*
+    // Create a new node that will output messages sent to it.
+    #[derive(Debug)]
+    struct LoggerNode{
+        data: FPBNodeContext,
+        log_file: Box<File>,
+    }
+
+    impl LoggerNode {
+        pub fn new(name: &'static str) -> Self {
+
+            if Path::new("logfile.txt").exists() {
+                fs::remove_file("logfile.txt");
+            }
+
+            LoggerNode {
+                data: FPBNodeContext::new(name),
+                log_file: Box::new(File::create("logfile.txt").unwrap()),
+            }
+        }
+
+        pub fn log_string(&mut self) -> String {
+            let mut contents = String::new();
+            self.log_file.read_to_string(&mut contents);
+            contents
+        }    
+    }
+
+    impl FPBNode for LoggerNode   {
+        fn node_data(&self) -> &FPBNodeContext {&self.data}
+
+        fn node_data_mut(&mut self) -> &mut FPBNodeContext {&mut self.data}
+
+        fn process_message(&mut self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
+
+            if msg.payload.is_some() {
+                let payload = msg.clone().payload.unwrap();
+                self.log_file.write(payload.as_bytes());
+            }
+
+            // Pass on the original message
+            Ok(msg.clone())
+        }
+    }
+
+
+    lazy_static! {
+        static ref LOGGERNODE: LoggerNode = {
+            let mut lnode = LoggerNode::new("Logger");
+            lnode
+        };
+    }
+     
+    */
 
 
     #[test]
@@ -585,7 +688,6 @@ mod test {
 
         assert_eq!(node.name, "TestNode");
         assert_eq!(node.node_is_running(), false);
-        assert_eq!(node.node_is_joined(), false);
 
         let mut other_node = FPBNodeContext::new(&"OtherNode");
 
@@ -597,60 +699,15 @@ mod test {
     }
 
     
-    use std::path::Path;
-    use std::fs;
-    use std::fs::File;
-    use std::io::prelude::*;
+   
 
-
-         // Create a new node that will output messages sent to it.
-    #[derive(Debug)]
-    struct LoggerNode{
-        data: FPBNodeContext,
-        log_file: Box<File>,
-    }
-
-    impl LoggerNode {
-        pub fn new(name: &'static str) -> Self {
-            
-            if Path::new("logfile.txt").exists() {
-                fs::remove_file("logfile.txt");
-            }
-
-            LoggerNode {
-                data: FPBNodeContext::new(name),
-                log_file: Box::new(File::create("logfile.txt").unwrap()),
-            }
-        }
-
-        pub fn log_string(&mut self) -> String {
-            let mut contents = String::new();
-            self.log_file.read_to_string(&mut contents);
-            contents
-        }
-
-        
-    }
-
-    impl FPBNode for LoggerNode   {
-        fn node_data(&self) -> &FPBNodeContext {&self.data}
-
-        fn node_data_mut(&mut self) -> &mut FPBNodeContext {&mut self.data}
-
-        fn process_message(&self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
-
-            if msg.payload.is_some() {
-                let payload = msg.clone().payload.unwrap();
-                self.log_file.write(payload.as_bytes());
-            }
-
-            // Pass on the original message
-            Ok(msg.clone())
-        }
-    }
     #[test]
     fn run_node() {
-        let &mut a_log_node = &mut LoggerNode::new("Logger");
+
+        /*
+        let a_log_node = &mut LOGGERNODE;
+
+        //let run_node: &'static mut LoggerNode = &mut a_log_node; 
         
         a_log_node.start();
 
@@ -667,6 +724,7 @@ mod test {
 
 
         assert_eq!(a_log_node.log_string(), "Test");
+        */
     }
 
 }
