@@ -19,8 +19,8 @@ use std::sync::atomic::{Ordering, AtomicBool};
 use std::fmt;
 use std::error::Error;
 use std::ops::{Deref};
-use serde::{Deserialize, Serialize};
-use serde_json::Result;
+// use serde::{Deserialize, Serialize};
+// use serde_json::Result;
 
 
 /* --------------------------------------------------------------------------
@@ -176,10 +176,6 @@ impl PartialEq for ReceiverContext {
         is_running:
                     An Atomic boolean that specifies if a node is running and
                     is able to receive and process messages.
-
-        is_joined:  An Atomic boolean that specifies if a node has been 
-                    stopped and that the join has completed.
-
    -------------------------------------------------------------------------- */             
 
 #[derive(Debug, Clone)]
@@ -191,7 +187,6 @@ pub struct FPBNodeContext {
     output_vec: Vec<Arc<Mutex<ReceiverContext>>>,
     is_running: Arc<AtomicBool>,
     join_handle: Option<Arc<thread::JoinHandle<()>>>,
-    is_joined: Arc<AtomicBool>,
 }
 
 /* --------------------------------------------------------------------------
@@ -219,21 +214,6 @@ pub struct FPBNodeContext {
                             member to specify if the node processing has
                             started (true) or if the node is NOT processing
                             (false)    
-                                            
-
-        node_is_joined:
-            Description:    Returns true if the node processing thread 
-                            has been joined, false otherwise.
-
-            Returns:        Boolean, true if the node has been joined 
-                            after it was stopped, false otherwise.
-
-
-        set_node_is_joined:
-            Parameters:
-                flag:       A boolean that will be set for the AtomicBool
-                            member to specify if the node thread has been
-                            joined.
 
         add_receiver:
             Parameters:
@@ -271,8 +251,6 @@ impl FPBNodeContext {
             output_vec: Vec::new(),
             is_running: Arc::new(AtomicBool::new(false)),
             join_handle: None,
-            is_joined: Arc::new(AtomicBool::new(false)),
-
         }
     }
 
@@ -295,7 +273,7 @@ impl FPBNodeContext {
         self.output_vec.remove(index);
     }
 
-    pub fn post_msg(&mut self, msg: IIDMessage) {
+    pub fn post_msg(&self, msg: IIDMessage) {
         if self.node_is_running() {
             let _ = self.tx.lock().unwrap().deref().send(msg);
         }
@@ -439,7 +417,7 @@ pub trait FPBNode {
 
     fn node_data(&self) -> &FPBNodeContext;
 
-    fn node_data_mut(&mut self) -> &mut FPBNodeContext;  
+    // fn node_data_mut(&mut self) -> &mut FPBNodeContext;  
 
     fn process_config(&self, msg:IIDMessage) -> std::result::Result<(), NodeError>;
 
@@ -479,8 +457,8 @@ pub trait FPBNode {
     }
 
 
-    fn stop(&mut self) { 
-       self.node_data_mut().set_node_is_running(false);
+    fn stop(&self) { 
+       self.node_data().set_node_is_running(false);
     }
 
 }
@@ -520,14 +498,16 @@ mod test {
     use std::path::Path;
     use std::fs;
     use std::fs::File;
+    use std::io::Read;
     use std::io::prelude::*;
     use std::sync::{Arc, RwLock, Mutex};
+    // use std::cell::RefCell;
 
 
     #[derive(Debug, Clone)]
     struct LoggerNode{
         data: Arc<FPBNodeContext>,
-        log_file: Arc<Mutex<File>>,
+        log_file:Arc<RwLock<File>>,
     }
    
     impl LoggerNode {
@@ -535,7 +515,7 @@ mod test {
         pub fn new(node_name: &'static str, logfile_name: &'static str) -> Self {
 
             if Path::new(logfile_name).exists() {
-                fs::remove_file(logfile_name);
+                fs::remove_file(logfile_name).expect("Faiiled to remove log file");
             }
 
             let f = File::create(logfile_name).unwrap();
@@ -543,19 +523,25 @@ mod test {
 
             LoggerNode {
                 data: Arc::new(ln),
-                log_file: Arc::new(Mutex::new(f)),   
+                log_file: Arc::new(RwLock::new(f)), 
             }
         }
 
-        pub fn wrap_self(mut self) -> Mutex<Arc<Box<dyn FPBNode + Send + Sync>>> {
+        pub fn wrap_self(self) -> Mutex<Arc<Box<dyn FPBNode + Send + Sync>>> {
             Mutex::new(Arc::new(Box::new(self.clone())))
+        }
+
+        fn log_string(&mut self) -> String {
+            let mut buf = Vec::new();
+            let fg = &mut self.log_file.read().unwrap().try_clone().unwrap();
+            fg.read_to_end(&mut buf).expect("Failed to read log file");
+
+            String::from_utf8(buf).unwrap()
         }
     }
 
     impl FPBNode for LoggerNode   {
         fn node_data(&self) -> &FPBNodeContext {&self.data}
-
-        fn node_data_mut(&mut self) -> &mut FPBNodeContext {&mut self.data }
 
         fn process_config(&self, msg:IIDMessage) -> Result<(), NodeError> {
             if msg.payload.is_some() {
@@ -573,16 +559,17 @@ mod test {
             if msg.payload.is_some() {
                 let payload = msg.clone().payload.unwrap();
 
-                let mut f = self.log_file.lock().unwrap();
-
-                //let mut f = self.log_file.write().unwrap();
-                f.write(payload.as_bytes());
-                // *f.write(payload.as_bytes());
+                let mut fg = self.log_file.write().unwrap();
+                fg.write(payload.as_bytes()).expect("Faiiled to write to log file");
             }
 
             // Pass on the original message
             Ok(msg.clone())
         }
+
+       
+
+
     }
 
 
@@ -618,27 +605,24 @@ mod test {
     #[test]
     fn run_node() {
 
-        /*
-        let a_log_node = &mut LOGGERNODE;
+        let a_log_node = LoggerNode::new("LoggerNode", "Log_file.txt");
 
-        //let run_node: &'static mut LoggerNode = &mut a_log_node; 
-        
-        a_log_node.start();
+        let node =  a_log_node.clone().wrap_self();
 
-        while !a_log_node.node_data().node_is_running() {
-            thread::sleep(time::Duration::new(1,0)) // This waits for 1 second.  TODO: maybe wait for shorter time.
+        a_log_node.clone().start(node);
+
+        while !a_log_node.clone().node_data().node_is_running() {
+            thread::sleep(time::Duration::new(1,0))
         }
 
-        assert_eq!(a_log_node.node_data().node_is_running(), true);
+        assert_eq!(a_log_node.clone().node_data().node_is_running(), true);
 
         let my_msg = IIDMessage::new(MessageType::Data, Some("Test".to_string()));
-        a_log_node.node_data().post_msg(my_msg);
+        a_log_node.clone().node_data().post_msg(my_msg);
 
-        a_log_node.stop();
+        a_log_node.clone().stop();
 
-
-        assert_eq!(a_log_node.log_string(), "Test");
-        */
+        assert_eq!(a_log_node.clone().log_string(), "Test");
     }
 
 }
