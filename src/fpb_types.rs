@@ -419,7 +419,7 @@ pub trait FPBNode {
 
     // fn node_data_mut(&mut self) -> &mut FPBNodeContext;  
 
-    fn process_config(&self, msg:IIDMessage) -> std::result::Result<(), NodeError>;
+    fn process_config(&self, msg:IIDMessage) -> std::result::Result<IIDMessage, NodeError>;
 
     fn process_message(&self, msg: IIDMessage) ->  std::result::Result<IIDMessage, NodeError>;
 
@@ -434,28 +434,30 @@ pub trait FPBNode {
 
                         let unwrapped_msg = msg_to_process.unwrap();
 
-                        match unwrapped_msg.msg_type {
-                            MessageType::Config => {
-                                if locked_node.process_config(unwrapped_msg.clone()).is_err() {
-                                    panic!("Failed a prosses_config: {}", unwrapped_msg.payload.unwrap_or("Unknown Message".to_string()));
+                        let processed_msg_result = match unwrapped_msg.msg_type {
+                            MessageType::Config => locked_node.process_config(unwrapped_msg.clone()),
+                            MessageType::Data => locked_node.process_message(unwrapped_msg.clone()),
+                        };
+
+                        if processed_msg_result.is_ok() {
+                            let processed_msg = locked_node.process_message(unwrapped_msg.clone()); 
+                            if processed_msg.is_ok() {
+                                let msg_to_send = processed_msg.unwrap().clone();
+                                for sender in &locked_node.node_data().output_vec {
+                                    let _ = sender.lock().unwrap().deref().input_queue.lock().unwrap().deref().send(msg_to_send.clone());
                                 }
-                            },
-                            MessageType::Data => {
-                                let processed_msg = locked_node.process_message(unwrapped_msg.clone()); 
-                                if processed_msg.is_ok() {
-                                    let msg_to_send = processed_msg.unwrap().clone();
-                                    for sender in &locked_node.node_data().output_vec {
-                                        let _ = sender.lock().unwrap().deref().input_queue.lock().unwrap().deref().send(msg_to_send.clone());
-                                    }
+                            }
+                        } else {
+                            let msg_to_send = unwrapped_msg.clone();
+                                for sender in &locked_node.node_data().output_vec {
+                                    let _ = sender.lock().unwrap().deref().input_queue.lock().unwrap().deref().send(msg_to_send.clone());
                                 }
-                            },
-                        } // match unwrapped_msg.msg_type      
+                        } // if processed_msg_result.is_ok()     
                     } // if msg_to_process.is_ok()
                 } // while locked_node.node_data().node_is_running()s
             } // if !locked_node.node_data().node_is_running()
         });
     }
-
 
     fn stop(&self) { 
        self.node_data().set_node_is_running(false);
@@ -523,9 +525,9 @@ mod test {
     impl FPBNode for PassthroughNode   {
         fn node_data(&self) -> &FPBNodeContext {&self.data}
 
-        fn process_config(&self, msg:IIDMessage) -> Result<(), NodeError> {
-            // Nothing to do
-            Ok(())
+        fn process_config(&self, msg:IIDMessage) -> Result<IIDMessage, NodeError> {
+            // Simply pass on the message that was sent to this node.
+            Ok(msg.clone())
         }
 
         fn process_message(&self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
@@ -559,7 +561,7 @@ mod test {
     impl FPBNode for AppendNode   {
         fn node_data(&self) -> &FPBNodeContext {&self.data}
 
-        fn process_config(&self, msg:IIDMessage) -> Result<(), NodeError> {
+        fn process_config(&self, msg:IIDMessage) -> Result<IIDMessage, NodeError> {
             if msg.payload.is_some() {
                 let payload = msg.clone().payload.unwrap();
                 if payload == "Stop".to_string() {
@@ -570,9 +572,11 @@ mod test {
                 // append_data from a Config message.  This would allow this node to be
                 // dynamially configurable.  Given that this is only for a unit test,
                 // I decided to be lazy.
+
+                
             }
 
-            Ok(())
+            Ok(msg.clone())
         }
 
         fn process_message(&self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
@@ -656,7 +660,7 @@ mod test {
     impl FPBNode for LoggerNode   {
         fn node_data(&self) -> &FPBNodeContext {&self.data}
 
-        fn process_config(&self, msg:IIDMessage) -> Result<(), NodeError> {
+        fn process_config(&self, msg:IIDMessage) -> Result<IIDMessage, NodeError> {
             if msg.payload.is_some() {
                 let payload = msg.clone().payload.unwrap();
                 if payload == "Stop".to_string() {
@@ -664,7 +668,7 @@ mod test {
                 }
             }
 
-            Ok(())
+            Ok(msg.clone())
         }
 
         fn process_message(&self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
