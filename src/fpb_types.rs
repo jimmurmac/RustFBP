@@ -504,8 +504,100 @@ mod test {
     use std::sync::{Arc, Mutex};
     use std::fs::OpenOptions;
 
-    // use std::cell::RefCell;
 
+    #[derive(Debug, Clone)]
+    struct PassthroughNode {
+        data: Arc<FPBNodeContext>,
+    }
+
+    impl PassthroughNode {
+        pub fn new(node_name: &'static str) -> Self {
+            let pn = FPBNodeContext::new(node_name);
+
+            PassthroughNode {
+                data: Arc::new(pn),
+            }
+        }
+    }
+
+    impl FPBNode for PassthroughNode   {
+        fn node_data(&self) -> &FPBNodeContext {&self.data}
+
+        fn process_config(&self, msg:IIDMessage) -> Result<(), NodeError> {
+            // Nothing to do
+            Ok(())
+        }
+
+        fn process_message(&self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
+            // Simply pass on the message that was sent to this node.
+            Ok(msg.clone())
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct AppendNode {
+        data: Arc<FPBNodeContext>,
+        append_data: Arc<Option<String>>,
+    }
+
+
+    impl AppendNode {
+        pub fn new(node_name: &'static str) -> Self {
+            let an = FPBNodeContext::new(node_name);
+
+            AppendNode {
+                data: Arc::new(an),
+                append_data: Arc::new(None),
+            }
+        }
+
+        pub fn set_append_data(&mut self, data: String) {
+           let _ = self.append_data.replace(data);
+        }
+    }
+
+    impl FPBNode for AppendNode   {
+        fn node_data(&self) -> &FPBNodeContext {&self.data}
+
+        fn process_config(&self, msg:IIDMessage) -> Result<(), NodeError> {
+            if msg.payload.is_some() {
+                let payload = msg.clone().payload.unwrap();
+                if payload == "Stop".to_string() {
+                   self.stop();
+                }
+
+                // What the AppendNode should do is have a message that would set the 
+                // append_data from a Config message.  This would allow this node to be
+                // dynamially configurable.  Given that this is only for a unit test,
+                // I decided to be lazy.
+            }
+
+            Ok(())
+        }
+
+        fn process_message(&self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
+            if msg.payload.is_some() {
+                let mut payload = msg.clone().payload.unwrap();
+
+                // Check to see if the append_data field has a value.  If it does then
+                // append that value to the payload string.
+                // NOTE:  In the 'real' world the payload string will be a JSON string.
+                // this will allow for deserializing the JSON object into a Rust object.
+                // the concept of 'append' would be quite different.  For now for this 
+                // unit test, this will simply append the append data to the message 
+                // payload and send it on.
+                if self.append_data.is_some() {
+                    let append_string = self.append_data.as_ref().as_ref().unwrap();
+                    payload.push_str(append_string.as_str());
+
+                    let new_msg = IIDMessage::new(MessageType::Data, Some(payload));
+                    return Ok(new_msg);
+                }                
+            }
+
+            Ok(msg.clone())
+        }
+    }
 
     #[derive(Debug, Clone)]
     struct LoggerNode{
@@ -585,6 +677,7 @@ mod test {
 
             Ok(msg.clone())
         }
+    }
 
     #[test]
     fn test_iidmessage() {
