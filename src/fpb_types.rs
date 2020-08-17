@@ -417,7 +417,7 @@ pub trait FPBNode {
 
     fn node_data(&self) -> &FPBNodeContext;
 
-    // fn node_data_mut(&mut self) -> &mut FPBNodeContext;  
+    fn node_data_mut(&mut self) -> &mut FPBNodeContext;  
 
     fn process_config(&self, msg:IIDMessage) -> std::result::Result<IIDMessage, NodeError>;
 
@@ -501,10 +501,12 @@ mod test {
     use std::fs;
     use std::fs::File;
     use std::io;
-    use std::io::{Read, BufReader};
+    use std::io::Read;
     use std::io::prelude::*;
     use std::sync::{Arc, Mutex};
     use std::fs::OpenOptions;
+    use std::ops::{Deref, DerefMut};
+    
 
 
     #[derive(Debug, Clone)]
@@ -520,13 +522,50 @@ mod test {
                 data: Arc::new(pn),
             }
         }
+
+        fn wrap_node(self) -> Mutex<Arc<Box<dyn FPBNode + Send + Sync>>> {
+            Mutex::new(Arc::new(Box::new(self)))
+        }
+    }
+
+    impl DerefMut for PassthroughNode {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.data
+        }
+    }
+
+    impl Deref for PassthroughNode {
+
+        type Target = Arc<FPBNodeContext>;
+
+        fn deref(&self) -> &Self::Target {
+            &self.data
+        }
     }
 
     impl FPBNode for PassthroughNode   {
         fn node_data(&self) -> &FPBNodeContext {&self.data}
 
+        fn node_data_mut(&mut self) -> &mut FPBNodeContext {&mut self.data}
+
         fn process_config(&self, msg:IIDMessage) -> Result<IIDMessage, NodeError> {
-            // Simply pass on the message that was sent to this node.
+            if msg.payload.is_some() {
+                let payload = msg.clone().payload.unwrap();
+                if payload == "Stop".to_string() {
+                    println!("PassthroughNode has been requested to stop");
+                    self.stop();
+                }
+
+
+
+                // What the AppendNode should do is have a message that would set the 
+                // append_data from a Config message.  This would allow this node to be
+                // dynamially configurable.  Given that this is only for a unit test,
+                // I decided to be lazy.
+
+                
+            }
+
             Ok(msg.clone())
         }
 
@@ -539,33 +578,58 @@ mod test {
     #[derive(Debug, Clone)]
     struct AppendNode {
         data: Arc<FPBNodeContext>,
-        append_data: Arc<Option<String>>,
+        // append_data: Arc<String>,
+        append_data: String,
     }
 
 
     impl AppendNode {
         pub fn new(node_name: &'static str) -> Self {
             let an = FPBNodeContext::new(node_name);
+            let ad = String::new();
 
             AppendNode {
                 data: Arc::new(an),
-                append_data: Arc::new(None),
+                // append_data: Arc::new(ad),
+                append_data: ad,
             }
         }
 
         pub fn set_append_data(&mut self, data: String) {
-           let _ = self.append_data.replace(data);
+            self.append_data.clear();
+            self.append_data.insert_str(0, data.as_str());
+        }
+
+        fn wrap_node(self) -> Mutex<Arc<Box<dyn FPBNode + Send + Sync>>> {
+            Mutex::new(Arc::new(Box::new(self)))
+        }
+    }
+
+    impl DerefMut for AppendNode {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.data
+        }
+    }
+
+    impl Deref for AppendNode {
+        type Target = Arc<FPBNodeContext>;
+        
+        fn deref(&self) -> &Self::Target {
+            &self.data
         }
     }
 
     impl FPBNode for AppendNode   {
         fn node_data(&self) -> &FPBNodeContext {&self.data}
 
+        fn node_data_mut(&mut self) -> &mut FPBNodeContext {&mut self.data}
+
         fn process_config(&self, msg:IIDMessage) -> Result<IIDMessage, NodeError> {
             if msg.payload.is_some() {
                 let payload = msg.clone().payload.unwrap();
                 if payload == "Stop".to_string() {
-                   self.stop();
+                    println!("AppendNode has been requested to stop");
+                    self.stop();
                 }
 
                 // What the AppendNode should do is have a message that would set the 
@@ -580,6 +644,7 @@ mod test {
         }
 
         fn process_message(&self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
+
             if msg.payload.is_some() {
                 let mut payload = msg.clone().payload.unwrap();
 
@@ -590,13 +655,9 @@ mod test {
                 // the concept of 'append' would be quite different.  For now for this 
                 // unit test, this will simply append the append data to the message 
                 // payload and send it on.
-                if self.append_data.is_some() {
-                    let append_string = self.append_data.as_ref().as_ref().unwrap();
-                    payload.push_str(append_string.as_str());
-
-                    let new_msg = IIDMessage::new(MessageType::Data, Some(payload));
-                    return Ok(new_msg);
-                }                
+                payload.push_str(self.append_data.as_str());
+                let new_msg = IIDMessage::new(MessageType::Data, Some(payload));
+                return Ok(new_msg);
             }
 
             Ok(msg.clone())
@@ -606,7 +667,6 @@ mod test {
     #[derive(Debug, Clone)]
     struct LoggerNode{
         data: Arc<FPBNodeContext>,
-        //log_file:Arc<RwLock<File>>,
         log_file_name: Arc<String>,
     }
    
@@ -614,11 +674,8 @@ mod test {
 
         pub fn new(node_name: &'static str, logfile_name: &'static str) -> Self {
 
-            if Path::new(logfile_name).exists() {
-                fs::remove_file(logfile_name).expect("Faiiled to remove log file");
-            }
-
-            let _file = File::create(logfile_name).expect ("Unable to create file");
+            let file = File::create(logfile_name).expect ("Unable to create file");
+            drop(file);
             
             let lfn = String::from(logfile_name);
             let ln = FPBNodeContext::new(node_name);
@@ -632,39 +689,75 @@ mod test {
         }  
 
         fn get_log_string(&mut self) -> io::Result<String> {
+
+            println!("In LoggerNode::get_log_string");
+
             let mut contents = String::new();
 
-            let mut file = OpenOptions::new().read(true).open(self.log_file_name.as_str())?;
-            
-            let rr =   file.read_to_string(&mut contents)?;
+            let mut file = OpenOptions::new().read(true).open(self.log_file_name.as_str()).expect("Failed to open file {} for reading");
+
+            println!("In LoggerNode::get_log_string: Open file {}", self.log_file_name);
+
+            file.read_to_string(&mut contents).expect("Failed to write contents to string");
+
+            drop(file);
+
+            println!("In LoggerNode::get_log_string: Contents of the file are {}", contents);
             
             Ok(contents)
         }
 
-        fn log_string_to_file(&self, data: &String) -> std::io::Result<()> {
-            
-            if !Path::new(self.log_file_name.as_str()).exists() {
-                let _file = File::create(self.log_file_name.as_str())?;
+        fn log_string_to_file(&self, data: &String) -> io::Result<()> {
+
+            println!("In LoggerNode::log_string_to_file: data = {}", data);
+
+            let mut file = OpenOptions::new().append(true).open(self.log_file_name.as_str()).expect("Failed to open file for append");
+
+            println!("In LoggerNode::log_string_to_file: Opened file {} for append", self.log_file_name);
+
+            let write_result = file.write(data.as_bytes());
+            if write_result.is_err() {
+                println!("In LoggerNode::log_string_to_file: FAILED to write {} to file {}", data, self.log_file_name);
+            } else {
+                println!("In LoggerNode::log_string_to_file: Successfully wrote {} to file {}", data, self.log_file_name);
             }
 
-            let mut file = OpenOptions::new().append(true).open(self.log_file_name.as_str())?;
-            file.write(data.as_bytes())?;
+            drop(file);
+
             Ok(())
         }
 
-        pub fn wrap_self(self) -> Mutex<Arc<Box<dyn FPBNode + Send + Sync>>> {
-            Mutex::new(Arc::new(Box::new(self.clone())))
+        fn wrap_node(self) -> Mutex<Arc<Box<dyn FPBNode + Send + Sync>>> {
+            Mutex::new(Arc::new(Box::new(self)))
+        }
+    }
+
+    impl DerefMut for LoggerNode {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.data
+        }
+    }
+
+    impl Deref for LoggerNode {
+
+        type Target = Arc<FPBNodeContext>;
+        
+        fn deref(&self) -> &Self::Target {
+            &self.data
         }
     }
 
     impl FPBNode for LoggerNode   {
         fn node_data(&self) -> &FPBNodeContext {&self.data}
 
+        fn node_data_mut(&mut self) -> &mut FPBNodeContext {&mut self.data}
+
         fn process_config(&self, msg:IIDMessage) -> Result<IIDMessage, NodeError> {
             if msg.payload.is_some() {
                 let payload = msg.clone().payload.unwrap();
                 if payload == "Stop".to_string() {
-                   self.stop();
+                    println!("LoggerNode has been requested to stop");
+                    self.stop();
                 }
             }
 
@@ -704,43 +797,82 @@ mod test {
         assert_eq!(node.output_vec.len(), 1);
 
         node.remove_receiver(&mut other_node);
-        assert_eq!(node.output_vec.len(), 0)
+        assert_eq!(node.output_vec.len(), 0);
     }
 
-    
-   
+
 
     #[test]
     fn run_node() {
 
-        let a_log_node = LoggerNode::new("LoggerNode", "Log_file.txt");
+        let mut a_passthrough_node =  PassthroughNode::new("PassthroughNode");
 
-        let node =  a_log_node.clone().wrap_self();
+        let mut an_append_node = AppendNode::new("AppendNode");
 
-        a_log_node.clone().start(node);
+        let mut a_log_node = LoggerNode::new("LoggerNode", "Log_file.txt");
 
+
+        an_append_node.set_append_data(" World".to_string());
+
+        // Wire of the nodes. NOTE: In the 'real' world, this configuration of 
+        // a network would be accomplished by sending a Config message to a
+        // 'Configurtor node that would read a JSON string that mapped the 
+        // network and would create the nodes and wire them up.  In this simply
+        // unit test, it will be done manually
+
+        a_passthrough_node.data.add_receiver(&mut an_append_node.node_data_mut());
+        an_append_node.data.add_receiver(&mut a_log_node.node_data_mut());
+
+        // I might want to make a generic function that will do this AND start the node.
+        let a_passthrough_node_fpbnode =  a_passthrough_node.clone().wrap_node();
+        let an_append_node_fpbnode =  an_append_node.clone().wrap_node();
+        let a_log_node_fpbnode =   a_log_node.clone().wrap_node();
+
+        
+         // Start the network NOTE: This shold most likely occur in the new function but
+        // for now ...
+        a_passthrough_node.clone().start(a_passthrough_node_fpbnode);
+        an_append_node.clone().start(an_append_node_fpbnode);
+        a_log_node.clone().start(a_log_node_fpbnode);
+        
+
+        // Wait for the last node to start.
         while !a_log_node.clone().node_data().node_is_running() {
             thread::sleep(time::Duration::new(1,0))
         }
-
+ 
+        assert_eq!(a_passthrough_node.clone().node_data().node_is_running(), true);
+        assert_eq!(an_append_node.clone().node_data().node_is_running(), true);
         assert_eq!(a_log_node.clone().node_data().node_is_running(), true);
 
-        let my_msg = IIDMessage::new(MessageType::Data, Some("Test".to_string()));
-        a_log_node.clone().node_data().post_msg(my_msg);
+        let my_msg = IIDMessage::new(MessageType::Data, Some("Hello".to_string()));
+        a_passthrough_node.clone().node_data().post_msg(my_msg);
 
-        a_log_node.clone().stop();
+        thread::sleep(time::Duration::new(1,0));
+
+        let my_stop_msg = IIDMessage::new(MessageType::Config, Some("Stop".to_string()));
+
+        a_passthrough_node.clone().node_data().post_msg(my_stop_msg);
+
+        thread::sleep(time::Duration::new(1,0));
+
+        assert_eq!(a_passthrough_node.clone().node_data().node_is_running(), false);
+        assert_eq!(an_append_node.clone().node_data().node_is_running(), false);
+        assert_eq!(a_log_node.clone().node_data().node_is_running(), false);
 
         let log_string_result = a_log_node.clone().get_log_string();
+
         if log_string_result.is_ok() {
             let log_string = log_string_result.unwrap();
 
             println!("In run_node and log_string = {}", log_string);
 
-            assert_eq!(log_string, "Test"); 
+            assert_eq!(log_string, "Hello  World"); 
 
         } else {
             println!("Failed to get the log string");
-        }   
+        } 
+         
     }
 
 }
