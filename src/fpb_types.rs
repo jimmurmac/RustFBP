@@ -511,7 +511,10 @@ mod test {
 
     #[derive(Debug, Clone)]
     struct PassthroughNode {
-        data: Arc<FPBNodeContext>,
+
+        // This needs to be a Arc<Mutex<FPBNodeContext>>
+        // data: Arc<FPBNodeContext>,
+        data: FPBNodeContext,
     }
 
     impl PassthroughNode {
@@ -519,27 +522,13 @@ mod test {
             let pn = FPBNodeContext::new(node_name);
 
             PassthroughNode {
-                data: Arc::new(pn),
+                //data: Arc::new(pn),
+                data: pn,
             }
         }
 
         fn wrap_node(self) -> Mutex<Arc<Box<dyn FPBNode + Send + Sync>>> {
             Mutex::new(Arc::new(Box::new(self)))
-        }
-    }
-
-    impl DerefMut for PassthroughNode {
-        fn deref_mut(&mut self) -> &mut Self::Target {
-            &mut self.data
-        }
-    }
-
-    impl Deref for PassthroughNode {
-
-        type Target = Arc<FPBNodeContext>;
-
-        fn deref(&self) -> &Self::Target {
-            &self.data
         }
     }
 
@@ -555,8 +544,6 @@ mod test {
                     println!("PassthroughNode has been requested to stop");
                     self.stop();
                 }
-
-
 
                 // What the AppendNode should do is have a message that would set the 
                 // append_data from a Config message.  This would allow this node to be
@@ -577,8 +564,8 @@ mod test {
 
     #[derive(Debug, Clone)]
     struct AppendNode {
-        data: Arc<FPBNodeContext>,
-        // append_data: Arc<String>,
+       // data: Arc<FPBNodeContext>,
+        data: FPBNodeContext,
         append_data: String,
     }
 
@@ -589,7 +576,8 @@ mod test {
             let ad = String::new();
 
             AppendNode {
-                data: Arc::new(an),
+                //data: Arc::new(an),
+                data: an,
                 // append_data: Arc::new(ad),
                 append_data: ad,
             }
@@ -602,20 +590,6 @@ mod test {
 
         fn wrap_node(self) -> Mutex<Arc<Box<dyn FPBNode + Send + Sync>>> {
             Mutex::new(Arc::new(Box::new(self)))
-        }
-    }
-
-    impl DerefMut for AppendNode {
-        fn deref_mut(&mut self) -> &mut Self::Target {
-            &mut self.data
-        }
-    }
-
-    impl Deref for AppendNode {
-        type Target = Arc<FPBNodeContext>;
-        
-        fn deref(&self) -> &Self::Target {
-            &self.data
         }
     }
 
@@ -666,7 +640,8 @@ mod test {
 
     #[derive(Debug, Clone)]
     struct LoggerNode{
-        data: Arc<FPBNodeContext>,
+        // data: Arc<FPBNodeContext>,
+        data: FPBNodeContext,
         log_file_name: Arc<String>,
     }
    
@@ -681,8 +656,8 @@ mod test {
             let ln = FPBNodeContext::new(node_name);
 
             LoggerNode {
-                data: Arc::new(ln),
-                //log_file: Arc::new(RwLock::new(f)), 
+                //data: Arc::new(ln),
+                data: ln,
                 log_file_name: Arc::new(lfn),
 
             }
@@ -729,21 +704,6 @@ mod test {
 
         fn wrap_node(self) -> Mutex<Arc<Box<dyn FPBNode + Send + Sync>>> {
             Mutex::new(Arc::new(Box::new(self)))
-        }
-    }
-
-    impl DerefMut for LoggerNode {
-        fn deref_mut(&mut self) -> &mut Self::Target {
-            &mut self.data
-        }
-    }
-
-    impl Deref for LoggerNode {
-
-        type Target = Arc<FPBNodeContext>;
-        
-        fn deref(&self) -> &Self::Target {
-            &self.data
         }
     }
 
