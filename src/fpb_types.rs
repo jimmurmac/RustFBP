@@ -19,8 +19,14 @@ use std::sync::atomic::{Ordering, AtomicBool};
 use std::fmt;
 use std::error::Error;
 use std::ops::{Deref};
-// use serde::{Deserialize, Serialize};
+
+// IIDMessage payload will be JSON strings in when this code is completed. 
+//
+// The serde::Deserialize, Serialize}; 
 // use serde_json::Result;
+//
+// will allow for serializing Rust structs into a JSON string and back again. 
+
 
 
 /* --------------------------------------------------------------------------
@@ -434,25 +440,23 @@ pub trait FPBNode {
 
                         let unwrapped_msg = msg_to_process.unwrap();
 
-                        let processed_msg_result = match unwrapped_msg.msg_type {
-                            MessageType::Config => locked_node.process_config(unwrapped_msg.clone()),
-                            MessageType::Data => locked_node.process_message(unwrapped_msg.clone()),
+                        let processed_msg = match unwrapped_msg.msg_type {
+                            MessageType::Config => {
+                                locked_node.process_config(unwrapped_msg.clone())
+                            },
+                            MessageType::Data => {
+                                locked_node.process_message(unwrapped_msg.clone())
+                            },
                         };
 
-                        if processed_msg_result.is_ok() {
-                            let processed_msg = locked_node.process_message(unwrapped_msg.clone()); 
-                            if processed_msg.is_ok() {
-                                let msg_to_send = processed_msg.unwrap().clone();
-                                for sender in &locked_node.node_data().output_vec {
-                                    let _ = sender.lock().unwrap().deref().input_queue.lock().unwrap().deref().send(msg_to_send.clone());
-                                }
+                        if processed_msg.is_ok() {
+                            let msg_to_send = processed_msg.unwrap();
+
+                            for sender in &locked_node.node_data().output_vec {
+                                let _ = sender.lock().unwrap().deref().input_queue.lock().unwrap().deref().send(msg_to_send.clone());
                             }
-                        } else {
-                            let msg_to_send = unwrapped_msg.clone();
-                                for sender in &locked_node.node_data().output_vec {
-                                    let _ = sender.lock().unwrap().deref().input_queue.lock().unwrap().deref().send(msg_to_send.clone());
-                                }
-                        } // if processed_msg_result.is_ok()     
+                        }   
+
                     } // if msg_to_process.is_ok()
                 } // while locked_node.node_data().node_is_running()s
             } // if !locked_node.node_data().node_is_running()
@@ -497,17 +501,12 @@ mod test {
     use super::NodeError;
     use super::FPBNode;
     use std::{thread, time};
-    use std::path::Path;
-    use std::fs;
     use std::fs::File;
     use std::io;
     use std::io::Read;
     use std::io::prelude::*;
     use std::sync::{Arc, Mutex};
     use std::fs::OpenOptions;
-    use std::ops::{Deref, DerefMut};
-    
-
 
     #[derive(Debug, Clone)]
     struct PassthroughNode {
@@ -538,10 +537,11 @@ mod test {
         fn node_data_mut(&mut self) -> &mut FPBNodeContext {&mut self.data}
 
         fn process_config(&self, msg:IIDMessage) -> Result<IIDMessage, NodeError> {
+
             if msg.payload.is_some() {
                 let payload = msg.clone().payload.unwrap();
+
                 if payload == "Stop".to_string() {
-                    println!("PassthroughNode has been requested to stop");
                     self.stop();
                 }
 
@@ -549,15 +549,16 @@ mod test {
                 // append_data from a Config message.  This would allow this node to be
                 // dynamially configurable.  Given that this is only for a unit test,
                 // I decided to be lazy.
-
                 
             }
 
+            // Sending the messsge on
             Ok(msg.clone())
         }
 
         fn process_message(&self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
             // Simply pass on the message that was sent to this node.
+
             Ok(msg.clone())
         }
     }
@@ -599,10 +600,10 @@ mod test {
         fn node_data_mut(&mut self) -> &mut FPBNodeContext {&mut self.data}
 
         fn process_config(&self, msg:IIDMessage) -> Result<IIDMessage, NodeError> {
+
             if msg.payload.is_some() {
                 let payload = msg.clone().payload.unwrap();
                 if payload == "Stop".to_string() {
-                    println!("AppendNode has been requested to stop");
                     self.stop();
                 }
 
@@ -642,7 +643,8 @@ mod test {
     struct LoggerNode{
         // data: Arc<FPBNodeContext>,
         data: FPBNodeContext,
-        log_file_name: Arc<String>,
+        // log_file_name: Arc<String>,
+        log_file_name: String,
     }
    
     impl LoggerNode {
@@ -658,45 +660,30 @@ mod test {
             LoggerNode {
                 //data: Arc::new(ln),
                 data: ln,
-                log_file_name: Arc::new(lfn),
-
+                // log_file_name: Arc::new(lfn),
+                log_file_name: lfn,
             }
         }  
 
         fn get_log_string(&mut self) -> io::Result<String> {
 
-            println!("In LoggerNode::get_log_string");
-
             let mut contents = String::new();
 
             let mut file = OpenOptions::new().read(true).open(self.log_file_name.as_str()).expect("Failed to open file {} for reading");
 
-            println!("In LoggerNode::get_log_string: Open file {}", self.log_file_name);
-
             file.read_to_string(&mut contents).expect("Failed to write contents to string");
 
             drop(file);
-
-            println!("In LoggerNode::get_log_string: Contents of the file are {}", contents);
             
             Ok(contents)
         }
 
         fn log_string_to_file(&self, data: &String) -> io::Result<()> {
 
-            println!("In LoggerNode::log_string_to_file: data = {}", data);
-
             let mut file = OpenOptions::new().append(true).open(self.log_file_name.as_str()).expect("Failed to open file for append");
 
-            println!("In LoggerNode::log_string_to_file: Opened file {} for append", self.log_file_name);
-
-            let write_result = file.write(data.as_bytes());
-            if write_result.is_err() {
-                println!("In LoggerNode::log_string_to_file: FAILED to write {} to file {}", data, self.log_file_name);
-            } else {
-                println!("In LoggerNode::log_string_to_file: Successfully wrote {} to file {}", data, self.log_file_name);
-            }
-
+            let _write_result = file.write(data.as_bytes());
+            
             drop(file);
 
             Ok(())
@@ -716,7 +703,6 @@ mod test {
             if msg.payload.is_some() {
                 let payload = msg.clone().payload.unwrap();
                 if payload == "Stop".to_string() {
-                    println!("LoggerNode has been requested to stop");
                     self.stop();
                 }
             }
@@ -726,10 +712,12 @@ mod test {
 
         fn process_message(&self, msg: IIDMessage) ->  Result<IIDMessage, NodeError> {
             if msg.payload.is_some() {
+
                 let payload = msg.clone().payload.unwrap();
+
                 if self.log_string_to_file(&payload).is_err() {
-                    return Err(NodeError::new("Failed to write message to log file"))
-                }
+                    return Err(NodeError::new("Failed to write message to log file"));
+                } 
             }
 
             Ok(msg.clone())
@@ -759,8 +747,6 @@ mod test {
         node.remove_receiver(&mut other_node);
         assert_eq!(node.output_vec.len(), 0);
     }
-
-
 
     #[test]
     fn run_node() {
@@ -825,14 +811,9 @@ mod test {
         if log_string_result.is_ok() {
             let log_string = log_string_result.unwrap();
 
-            println!("In run_node and log_string = {}", log_string);
+            assert_eq!(log_string, "Hello World");
 
-            assert_eq!(log_string, "Hello  World"); 
-
-        } else {
-            println!("Failed to get the log string");
         } 
-         
     }
 
 }
