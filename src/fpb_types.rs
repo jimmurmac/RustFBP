@@ -53,7 +53,8 @@ pub enum MessageType {
 
         payload:    This field will contain the actual message.  The type of
                     this field allows for an empty Message (None).  The 
-                    string in the field will most likely be a JSON string obj
+                    string in the field will be a JSON string obj in 'real'
+                    life.
    -------------------------------------------------------------------------- */
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,14 +73,6 @@ pub struct IIDMessage {
                 payload:    This will be the message for this message.  
 
             Description:    This will create a new message (Constructor)
-        
-        msg_type:
-            Description:    Accessor method to get the message type of this 
-                            message.
-
-        payload:
-            Description:    Accessor method to get the payload as a reference
-                            for this message.
     -------------------------------------------------------------------------- */
         
 #[allow(dead_code)] 
@@ -91,16 +84,6 @@ impl IIDMessage {
             payload,
         }
     }
-
-    // Return the message type for a IIDMessage
-    pub fn msg_type(&self) -> MessageType {
-        self.msg_type
-    }
-
-    // Return a reference to the payload of a IIDMessage
-    pub fn payload(&self) -> &Option<String> {
-        &self.payload
-    }
 }
 
 /* --------------------------------------------------------------------------
@@ -111,11 +94,11 @@ impl IIDMessage {
 
     Fields:
         node_uuid:  The unique identifier of the node that will be receiving
-                    the out of a node.
+                    the output of another node.
 
         input_queue:   
-                    This field if the asynchronous input channel for a node.
-                    This will allow a node to queue a message into another
+                    This field is the asynchronous input channel for a node.
+                    This will allow a node to queue a message to another
                     node for processing.
    -------------------------------------------------------------------------- */
 
@@ -147,6 +130,10 @@ impl ReceiverContext {
     }
 }
 
+/* --------------------------------------------------------------------------
+    Provide the ability to check equality for a ReceiverContext
+   -------------------------------------------------------------------------- */
+
 impl PartialEq for ReceiverContext {
     fn eq(&self, other: &Self) -> bool {
         self.node_uuid == other.node_uuid
@@ -176,8 +163,7 @@ impl PartialEq for ReceiverContext {
                     A vector of sender channels for the nodes that wish to 
                     get the output of the processing for this node.  Given
                     that this is a vector, any number of nodes can receive 
-                    the output of a node.  This will allow for both real 
-                    processing of a series of messages as well as logging.
+                    the output from a node. 
 
         is_running:
                     An Atomic boolean that specifies if a node is running and
@@ -192,7 +178,6 @@ pub struct FPBNodeContext {
     rx: Arc<Mutex<Receiver<IIDMessage>>>,
     output_vec: Vec<Arc<Mutex<ReceiverContext>>>,
     is_running: Arc<AtomicBool>,
-    join_handle: Option<Arc<thread::JoinHandle<()>>>,
 }
 
 /* --------------------------------------------------------------------------
@@ -237,9 +222,8 @@ pub struct FPBNodeContext {
         post_msg:
             Parameters:
                 msg:        An input IIDMessage that will be added to the 
-                            queue of messages that need to be processed by 
+                            queue of messages that will be processed by 
                             this node.
-
    -------------------------------------------------------------------------- */
 
 #[allow(dead_code)]
@@ -256,7 +240,6 @@ impl FPBNodeContext {
             rx: Arc::new(Mutex::new(receiver)),
             output_vec: Vec::new(),
             is_running: Arc::new(AtomicBool::new(false)),
-            join_handle: None,
         }
     }
 
@@ -285,8 +268,6 @@ impl FPBNodeContext {
         }
     }
 }
-
-
 
 /* --------------------------------------------------------------------------
     struct NodeError
@@ -346,7 +327,7 @@ impl Error for NodeError {
 /* --------------------------------------------------------------------------
     trait FPBNode
 
-    Description:    The FPBNode trait defines the fundamental behavior that 
+    Description:    The FPBNode trait defines the fundamental behaviors that 
                     a node must have.  
 
     Methods:
@@ -367,34 +348,33 @@ impl Error for NodeError {
             Implementation:
                             This method MUST be implemented by all types that
                             adhere to this trait.
+        process_config:
+
+            Parameters: 
+                msg:        The config message to be processed by this node.
+
+            Description:    This method is the means of configuring a node.        
         
         process_message:
 
             Parameters: 
-                msg:        The message to be processed by this node.
+                msg:        The data message to be processed by this node.
 
             Description:    This method is the heart of a node.  It is where
                             messages are processed and the results of that 
                             processing are returned.  
 
-            Implementation:
-                            The default implementation of this method simply
-                            clones the incoming message and returns it.  
-                            Almost all types that wish to adhere to this 
-                            trait, will want to re-implement this method so
-                            that it preforms the work of the node.
-
         start:
 
-            Description:    This method will start the processing for a node.
-                            It does this my stipulating that the node is 
-                            processing and then spawns a thread to read from
-                            the input queue of messages and then process 
-                            those messages until the node is stopped.  NOTE:
-                            If there are no messages in the input queue the
-                            call to recv will block until a message is 
-                            available.  This means that unless a node has
-                            work to do it is quiescent.  
+            Description:    This method will start a thread that will start
+                            by trying to get an IIDMessage to process.  If
+                            there are no messages to process the thread will
+                            block until a message is available.  This means
+                            that the thread will only run if there is work
+                            to be done.  Once a message is received it will
+                            will be processed by the node's implementation 
+                            of process_config if the message type is Config 
+                            or process_message if the message type id Data.
 
             Implementation:
                             The default implementation of this method should
@@ -405,11 +385,8 @@ impl Error for NodeError {
             Description:    This method will set the is_running atomic bool
                             to be false.  This will cause the loop started
                             in the start method to complete it's current 
-                            processing and then fall out of the while loop
-                            and have the thread joined so as not to leave 
-                            zombies.  
-
-            
+                            processing and then fall out of the while loop.
+   
             Implementation:
                             The default implementation of this method should
                             serve for most nodes.  Waits for thread to be 
@@ -469,6 +446,14 @@ pub trait FPBNode {
 
 }
 
+
+/* ==========================================================================
+    Unit Test
+
+    With Rust, Unit tests typically are in the same file as the 
+    implementation. 
+   ========================================================================== */
+
 /* --------------------------------------------------------------------------
     mod test 
 
@@ -507,6 +492,21 @@ mod test {
     use std::io::prelude::*;
     use std::sync::{Arc, Mutex};
     use std::fs::OpenOptions;
+
+    /* ----------------------------------------------------------------------
+        To allow for testing node interactions, this unit test creates three
+        nodes:
+
+        PassthroughNode:    This node is a "null" node.  It just passes it's
+                            input to it's output
+
+        AppendNode:         This node will append a string to the message's 
+                            it receives and then sends them onto the next
+                            node.
+
+        LoggerNode:         This node will write out the payload of the 
+                            data messages that are sent to it to a file.
+       ---------------------------------------------------------------------- */
 
     #[derive(Debug, Clone)]
     struct PassthroughNode {
