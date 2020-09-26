@@ -13,7 +13,7 @@
     History:        Jim Murphy 09/19/2020   Initial Code.
                     Jim Murphy 09/22/2020   Rewrite after prototype
 
-    Copyright ©  2020 Pesa Switching Systems Inc. All rights reserved.
+    Copyright ©  2020 Jim Murphy All rights reserved.
    ========================================================================== */
 
 use crate::fbp_types::*;

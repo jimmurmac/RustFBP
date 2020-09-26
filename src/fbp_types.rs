@@ -8,7 +8,7 @@
     History:        Jim Murphy 08/07/2020   Initial Code.
                     Jim Murphjy 09/13/2020  Got all of the unit tests passing.
 
-    Copyright ©  2020 Pesa Switching Systems Inc. All rights reserved.
+    Copyright ©  2020 Jim Murphy All rights reserved.
    ========================================================================== */
 
 // System Libraries (Crates) used by this file
