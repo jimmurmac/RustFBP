@@ -15,4 +15,5 @@ lazy_static = "*"
 futures = { version = "0.3.*" }
 tokio = {version = "0.2.*", features = ["full"] }
 async-trait = "*"
-async-std = { version = "1.0.0", features = ["attributes"] }
+async-std = { version = "1.*", features = ["attributes"] }
+actix-rt = "*"
