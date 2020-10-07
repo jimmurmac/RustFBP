@@ -16,7 +16,6 @@
     Copyright ©  2020 Jim Murphy All rights reserved.
    ========================================================================== */
 
-
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,12 +29,6 @@ use crate::fbp_test_nodes::*;
 use crate::fbp_node_trait::*;
 
 
-/* ----------------------------------------------------------------------
-    A helper function to get a value for a key value pair in a JSON
-    string
-    get_value_from_json_map_key:
-   ---------------------------------------------------------------------- */
-pub fn get_value_from_json_map_key(json_str: &str, key: &str) -> String {
     // Sanitize the json_str just in case
     let clean_string = json_str.replace("\\\"", "");
 

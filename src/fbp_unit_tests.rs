@@ -101,7 +101,6 @@ mod test {
      ---------------------------------------------------------------------- */
     #[test]
     fn test_fbpnode_context() {
-
         let mut node = FBPNodeContext::new(&"TestNode");
 
         assert_eq!(node.name, "TestNode".to_string());
