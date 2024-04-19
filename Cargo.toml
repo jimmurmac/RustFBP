@@ -1,5 +1,5 @@
 [package]
-name = "fpb"
+name = "fbp"
 version = "0.1.0"
 authors = ["jimmur"]
 edition = "2018"
@@ -16,3 +16,5 @@ tokio = {version = "0.2.*", features = ["full"] }
 async-trait = "*"
 async-std = { version = "1.*", features = ["attributes"] }
 actix-rt = "*"
+strum = { version = "0.24.*", features = ["derive"] }
+strum_macros = "0.24.*"

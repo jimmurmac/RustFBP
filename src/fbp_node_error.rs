@@ -1,57 +1,67 @@
-use std::fmt;
+/***********************************************************************************
+ *      W A R N I N G !   W A R N I N G !  W A R N I N G !  W A R N I N G !
+ * 
+ *  This file should no longer be used.  It is still here for historical reference
+ ***********************************************************************************/
+ 
+/* =================================================================================
+ File:           fbp_node_error.rs
+
+ Description:    This file contains an Error type for FBP nodes
+
+
+ History:        RustDev 03/31/2021   Code ported from original rustfbp crate
+
+ Copyright ©  2021 Pesa Switching Systems Inc. All rights reserved.
+================================================================================== */
+
+//! # Specific Error Type for FBP nodes
+//!
+//! Many of the methods for FBP nodes will return a Result.  Some of those Results will
+//! contain an error.  The Error type defined here will provide that Error type.
+//!
+/*
 use std::error::Error;
+use std::fmt;
 
-/* --------------------------------------------------------------------------
-    struct NodeError
+/// # FBP Error Type
+///
+/// An FBP specific Error type
+///
+#[derive(Debug)]
+pub struct NodeError {
+    details: String,
+}
 
-    Defines an error type for nodes.  This is still a Work in Progress.  
-    What needs to be done is to provide an enumeration of various node errors.
+impl NodeError {
+    /// Creates a new NodeError
+    ///
+    /// # Example
+    ///
+    /// Basic usage:
+    /// ```
+    /// use fbp::fbp_node_error::*;
+    ///
+    /// let a_fbp_error= NodeError::new("Some error message");
+    ///
+    /// ```
+    ///
+    pub fn new(msg: &str) -> NodeError {
+        NodeError {
+            details: msg.to_string(),
+        }
+    }
+}
 
-    Fields:
-        details:    The details field will contain a human readable version 
-                    of the error.
-   -------------------------------------------------------------------------- */
+impl fmt::Display for NodeError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.details)
+    }
+}
 
-   #[derive(Debug)]
-   pub struct NodeError {
-       details: String
-   }
-   
-   /* --------------------------------------------------------------------------
-       struct NodeError behavior
-   
-       Methods:
-           new:
-               Parameters: 
-                   msg:        A human readable error message.
-   
-               Description:    This will create a new NodeError 
-                               (Constructor)
-      -------------------------------------------------------------------------- */
-   
-   #[allow(dead_code)]
-   impl NodeError {
-       pub fn new(msg: &str) -> NodeError {
-           NodeError {details: msg.to_string()}
-       }
-   }
-   
-   /* --------------------------------------------------------------------------
-       Implement the fmt::Display trait for the NodeError struct
-      -------------------------------------------------------------------------- */
-   
-   impl fmt::Display for NodeError {
-       fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-           write!(f, "{}", self.details)
-       }
-   }
-   
-   /* --------------------------------------------------------------------------
-       Implement the Error trait for the NodeError struct
-      -------------------------------------------------------------------------- */
-   
-   impl Error for NodeError {
-       fn description(&self) -> &str {
-           &self.details
-       }
-   }
+impl Error for NodeError {
+    fn description(&self) -> &str {
+        &self.details
+    }
+}
+*/
