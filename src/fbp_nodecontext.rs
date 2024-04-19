@@ -312,7 +312,7 @@ pub enum Nodes {
            where D: Deserializer<'de>,
        {
    
-           enum Field { Name/*, Tx, Rx, Output_vec, Is_running */};
+           enum Field { Name/*, Tx, Rx, Output_vec, Is_running */}
    
            impl<'de> Deserialize<'de> for Field {
                fn deserialize<D>(deserializer: D) -> Result<Field, D::Error>
