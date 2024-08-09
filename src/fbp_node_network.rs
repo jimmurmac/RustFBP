@@ -49,7 +49,6 @@
 //! This ability will form the basis of how a network of nodes may be created from a
 //! JSON representation.
 
-#[cfg(feature = "fbp_network")]
 use crate::fbp_node_network::tests::NodesEnum;
 use async_trait::async_trait;
 use futures::future::*;
@@ -60,16 +59,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::{thread, time};
 use uuid::Uuid;
 
-#[cfg(feature = "fbp_network")]
 use strum::IntoEnumIterator;
 
-#[cfg(feature = "fbp_network")]
 use strum_macros::EnumIter;
 
-#[cfg(feature = "fbp_network")]
 use std::str::FromStr;
 
-#[cfg(feature = "fbp_network")]
 use strum_macros::EnumString;
 
 #[allow(unused_imports)]
@@ -88,7 +83,6 @@ use crate::fbp_node_context::*;
 ///
 /// The NodeCreator trait is usen by the make_nodes macro to provide the ability to create
 /// an FBP Node from the string name of the struct.
-#[cfg(feature = "fbp_network")]
 pub trait NodeCreator {
     fn make_node(&self) -> Option<FBPNodeContext>;
 
@@ -100,8 +94,6 @@ static mut HAS_NODESENUM: AtomicBool = AtomicBool::new(false);
 
 /// set_has_nodesenum
 ///
-/// This is an internal function that is used to signal that the
-/// fbp_network feature is in use
 #[allow(dead_code)]
 pub fn set_has_nodesenum(flag: bool) {
     unsafe {
@@ -111,7 +103,6 @@ pub fn set_has_nodesenum(flag: bool) {
 
 /// get_has_nodesenum
 ///
-/// This function will return true if the fbp_network feature is on.
 #[allow(dead_code)]
 fn get_has_nodesenum() -> bool {
     unsafe { HAS_NODESENUM.load(Ordering::SeqCst) }
@@ -142,7 +133,6 @@ fn get_has_nodesenum() -> bool {
 /// It is this ability to create an instance of an FBPNode from a str that allows
 /// for using a JSON string to describe a comnplete FBP network of nodes and
 /// subsequently create those nodes.
-#[cfg(feature = "fbp_network")]
 #[macro_export]
 macro_rules! make_nodes {
 
@@ -353,7 +343,6 @@ impl NodeNetworkItem {
 
     fn base_create_node(&self) -> Option<FBPNodeContext> {
         if get_has_nodesenum() {
-            #[cfg(feature = "fbp_network")]
             {
                 let an_enum_op = NodesEnum::find_node(self.name().as_str());
                 if an_enum_op.is_none() {
@@ -1033,11 +1022,9 @@ mod tests {
     // (with a use statement).  Once that is done the the make_nodes! macro will be called with the
     // list of the nodes.  The placement of this call outside of any function mimics the 'normal'
     // way that the make_nodes! macro will be used.
-    #[cfg(feature = "fbp_network")]
     make_nodes!(PassthroughNode, AppendNode, LoggerNode);
 
     #[test]
-    #[cfg(feature = "fbp_network")]
     fn feature_test() {
         set_has_nodesenum(true);
         for node_enum in NodesEnum::iter() {
@@ -1150,7 +1137,6 @@ mod tests {
     // JSON strings to create an FBP network.
 
     #[actix_rt::test]
-    #[cfg(feature = "fbp_network")]
     async fn network_from_json() {
         remove_logger_file("Log_file.txt");
 
