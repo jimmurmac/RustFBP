@@ -345,9 +345,8 @@ impl NodeNetworkItem {
         if get_has_nodesenum() {
             {
                 let an_enum_op = NodesEnum::find_node(self.name().as_str());
-                if an_enum_op.is_none() {
-                    return None;
-                }
+                an_enum_op.as_ref()?;
+                
                 let an_enum = an_enum_op.unwrap();
 
                 let ctx_op = an_enum.make_node();
@@ -357,7 +356,7 @@ impl NodeNetworkItem {
                     return None;
                 }
 
-                if self.configurations.len() > 0 {
+                if !self.configurations.is_empty() {
                     let ctx = ctx_op.clone().unwrap().clone();
                     for a_config_str in &self.configurations {
                         let my_config_message = ConfigMessage::new(
@@ -681,18 +680,18 @@ mod tests {
      Define some FBP nodes that can be used for testing.
     -------------------------------------------------------------------------- */
 
-    // The PassthroughNode just passes messages from its input to all of its
+    // The Passthrough just passes messages from its input to all of its
     // receivers.
     #[derive(Clone, Serialize, Deserialize)]
-    pub struct PassthroughNode {
+    pub struct Passthrough {
         data: Box<FBPNodeContext>,
     }
 
-    impl PassthroughNode {
+    impl Passthrough {
         #[allow(dead_code)]
         pub fn new() -> Self {
-            let result = PassthroughNode {
-                data: Box::new(FBPNodeContext::new("PassthroughNode")),
+            let result = Passthrough {
+                data: Box::new(FBPNodeContext::new("Passthrough")),
             };
 
             result.node_data().set_node_is_configured(true);
@@ -702,7 +701,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl FBPNodeTrait for PassthroughNode {
+    impl FBPNodeTrait for Passthrough {
         fn node_data_clone(&self) -> FBPNodeContext {
             self.data.deref().clone()
         }
@@ -720,7 +719,7 @@ mod tests {
         }
     }
 
-    impl Drop for PassthroughNode {
+    impl Drop for Passthrough {
         fn drop(&mut self) {
             self.stop();
         }
@@ -1022,7 +1021,7 @@ mod tests {
     // (with a use statement).  Once that is done the the make_nodes! macro will be called with the
     // list of the nodes.  The placement of this call outside of any function mimics the 'normal'
     // way that the make_nodes! macro will be used.
-    make_nodes!(PassthroughNode, AppendNode, LoggerNode);
+    make_nodes!(Passthrough, AppendNode, LoggerNode);
 
     #[test]
     fn feature_test() {
@@ -1037,9 +1036,9 @@ mod tests {
 
     #[test]
     fn node_creation_test() {
-        let pt_node = PassthroughNode::new();
+        let pt_node = Passthrough::new();
         let mut node_name = pt_node.node_data().name();
-        assert_eq!("PassthroughNode".to_string(), node_name);
+        assert_eq!("Passthrough".to_string(), node_name);
 
         let ap_node = AppendNode::new();
         node_name = ap_node.node_data().name();
@@ -1066,7 +1065,7 @@ mod tests {
     async fn by_hand_node_network() {
         remove_logger_file("Log1_file.txt");
 
-        let mut pt_node = PassthroughNode::new();
+        let mut pt_node = Passthrough::new();
         let mut ap_node = AppendNode::new();
         let mut lg_node = LoggerNode::new();
 
@@ -1102,7 +1101,7 @@ mod tests {
     // wait for the payload instead of using a sleep.
     #[actix_rt::test]
     async fn by_hand_node_network_with_wait() {
-        let mut pt_node = PassthroughNode::new();
+        let mut pt_node = Passthrough::new();
         let mut ap_node = AppendNode::new();
         let mut wait_node = WaitForPayloadNode::new();
 
@@ -1148,7 +1147,7 @@ mod tests {
 
         // This very long string would in 'normal' cases, be read from a file.  This is here for
         // a quick test.  It has the same organization as is seen in the by_hand_node_network test.
-        let config_string = "{\"node_name\":\"PassthroughNode\",\"configurations\":[],\"connections\":{\"node_network\":{\"Any\":[{\"node_name\":\"AppendNode\",\"configurations\":[\"{\\\"append_data\\\": \\\" World\\\"}\"],\"connections\":{\"node_network\":{\"Any\":[{\"node_name\":\"LoggerNode\",\"configurations\":[\"{\\\"log_file_path\\\":\\\"Log_file.txt\\\"}\"],\"connections\":{\"node_network\":{}}}]}}}]}}}".to_string();
+        let config_string = "{\"node_name\":\"Passthrough\",\"configurations\":[],\"connections\":{\"node_network\":{\"Any\":[{\"node_name\":\"AppendNode\",\"configurations\":[\"{\\\"append_data\\\": \\\" World\\\"}\"],\"connections\":{\"node_network\":{\"Any\":[{\"node_name\":\"LoggerNode\",\"configurations\":[\"{\\\"log_file_path\\\":\\\"Log_file.txt\\\"}\"],\"connections\":{\"node_network\":{}}}]}}}]}}}".to_string();
 
         let nni_result: Result<NodeNetworkItem, serde_json::Error> =
             serde_json::from_str(config_string.as_str());
@@ -1164,7 +1163,7 @@ mod tests {
         config.wait_for_nodes_to_all_be_running().await;
         config.wait_for_nodes_to_be_configured().await;
 
-        let pt_ctx_op = config.find_node_name("PassthroughNode".to_string());
+        let pt_ctx_op = config.find_node_name("Passthrough".to_string());
         assert!(pt_ctx_op.is_some());
 
         let pt_ctx = pt_ctx_op.unwrap();
