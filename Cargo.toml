@@ -7,14 +7,17 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+r_utilities = { path = "../r_utilities" }
+
 serde =  { version = "1.0.*", features = ["rc", "serde_derive"] }
 serde_derive = "1.0.*"
 serde_json = "1.0.*"
 uuid = { version = "0.8.1", features = ["serde", "v4"] }
 futures = { version = "0.3.*" }
 tokio = {version = "0.2.*", features = ["full"] }
-async-trait = "*"
-async-std = { version = "1.*", features = ["attributes"] }
+async-trait = "0.1.*"
 actix-rt = "*"
 strum = { version = "0.24.*", features = ["derive"] }
 strum_macros = "0.24.*"
+
+

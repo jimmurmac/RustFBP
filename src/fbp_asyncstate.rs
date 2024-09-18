@@ -169,8 +169,7 @@ mod tests {
 
         let jh = thread::spawn(move || {
             thread::sleep(time::Duration::from_secs(1));
-
-            clone_asyncsatate.clone().set_is_ready(true);
+            clone_asyncsatate.set_is_ready(true);
         });
 
         // A clone is needed because the await actually runs a thread that polls the
@@ -179,6 +178,7 @@ mod tests {
 
         assert_eq!(my_asyncstate.is_ready(), true);
 
+        // Put your toys away when you are done playing with them.
         let _ = jh.join();
     }
 }

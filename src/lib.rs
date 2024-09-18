@@ -64,5 +64,4 @@ pub mod fbp_node_network;
 pub mod fbp_node_trait;
 pub mod fbp_threadsafe_wrapper;
 pub mod fbp_wait_for_payload;
-pub mod serialization_helpers;
 
