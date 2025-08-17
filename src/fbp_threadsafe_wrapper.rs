@@ -114,7 +114,7 @@ impl<T> ThreadSafeType<T> {
     ///
     /// ```
     ///
-    pub fn get_type(&self) -> MutexGuard<T> {
+    pub fn get_type(&self) -> MutexGuard<'_, T> {
         self.data.lock().unwrap()
     }
 
@@ -289,7 +289,7 @@ impl<T> ThreadSafeOptionType<T> {
     ///
     /// ```
     ///
-    pub fn get_option(&self) -> MutexGuard<Option<T>> {
+    pub fn get_option(&self) -> MutexGuard<'_, Option<T>> {
         self.data.lock().unwrap()
     }
 
