@@ -94,12 +94,12 @@ static mut HAS_NODESENUM: AtomicBool = AtomicBool::new(false);
 
 /// set_has_nodesenum
 ///
-#[allow(dead_code)]
-pub fn set_has_nodesenum(flag: bool) {
-    unsafe {
-        *HAS_NODESENUM.get_mut() = flag;
-    }
-}
+// #[allow(dead_code)]
+// pub fn set_has_nodesenum(flag: bool) {
+//     unsafe {
+//         *HAS_NODESENUM.get_mut() = flag;
+//     }
+// }
 
 /// get_has_nodesenum
 ///
@@ -149,7 +149,8 @@ macro_rules! make_nodes {
                 let result = match self {
                     $(
                         NodesEnum::$x =>  {
-                            set_has_nodesenum(true);
+                            *HAS_NODESENUM.get_mut() = true;
+                            // set_has_nodesenum(true);
                             let mut a_node = $x::new();
                             Some(a_node.node_data_mut().clone())
                         }
@@ -159,7 +160,8 @@ macro_rules! make_nodes {
             }
 
             fn find_node(node_name:&str) -> Option<Self> {
-                set_has_nodesenum(true);
+                *HAS_NODESENUM.get_mut() = true;
+                // set_has_nodesenum(true);
                 let enum_result = NodesEnum::from_str(node_name);
                 if enum_result.is_err() {
                     return None
@@ -1025,7 +1027,8 @@ mod tests {
 
     #[test]
     fn feature_test() {
-        set_has_nodesenum(true);
+        *HAS_NODESENUM.get_mut() = true;
+       //  set_has_nodesenum(true);
         for node_enum in NodesEnum::iter() {
             let node_name = node_enum.to_string();
             let ctx_op = node_enum.make_node();
