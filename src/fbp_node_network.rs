@@ -149,7 +149,9 @@ macro_rules! make_nodes {
                 let result = match self {
                     $(
                         NodesEnum::$x =>  {
+                            unsafe {
                             *HAS_NODESENUM.get_mut() = true;
+                            }
                             // set_has_nodesenum(true);
                             let mut a_node = $x::new();
                             Some(a_node.node_data_mut().clone())
@@ -160,7 +162,9 @@ macro_rules! make_nodes {
             }
 
             fn find_node(node_name:&str) -> Option<Self> {
+                unsafe {
                 *HAS_NODESENUM.get_mut() = true;
+                }
                 // set_has_nodesenum(true);
                 let enum_result = NodesEnum::from_str(node_name);
                 if enum_result.is_err() {
