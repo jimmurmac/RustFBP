@@ -163,7 +163,7 @@ macro_rules! make_nodes {
 
             fn find_node(node_name:&str) -> Option<Self> {
                 unsafe {
-                *HAS_NODESENUM.get_mut() = true;
+                    *HAS_NODESENUM.get_mut() = true;
                 }
                 // set_has_nodesenum(true);
                 let enum_result = NodesEnum::from_str(node_name);
